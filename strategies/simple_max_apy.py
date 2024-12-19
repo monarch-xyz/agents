@@ -11,6 +11,20 @@ logger = logging.getLogger(__name__)
 class SimpleMaxAPYStrategy(BaseStrategy):
     """Simple strategy that reallocates based on market caps and APY"""
     
+    MAX_MARKET_IMPACT_RATIO = 0.05  # 5% of total supply
+    
+    def __init__(self, max_market_impact_ratio: float = 0.05):
+        """
+        Initialize strategy with configurable parameters
+        
+        Args:
+            max_market_impact_ratio: Maximum ratio of market's total supply that can be allocated
+                                   (default: 0.05 or 5%)
+        """
+        self.max_market_impact_ratio = max_market_impact_ratio
+        # Track allocations in wei to avoid TokenAmount complexity
+        self.market_allocations = defaultdict(int)
+    
     def calculate_reallocation(
         self,
         positions: List[MarketPosition],
@@ -30,6 +44,9 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         """
         if not market_data:
             return ReallocationStrategy(actions=[])
+            
+        # Reset market allocations for new calculation
+        self.market_allocations.clear()
             
         # Step 1: Group positions by loan token
         grouped_positions = self.process_positions(positions, market_data)
@@ -72,20 +89,20 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             if not available_markets:
                 logger.info(f"No available markets for {symbol}")
                 continue
-                
-            # Find best market (highest APY) that has a cap
-            best_market = None
+            
+            # Find all capped markets sorted by APY
+            capped_markets = []
             for market in available_markets:
                 if market.unique_key in caps_by_market:
-                    best_market = market
-                    break
-                    
-            if not best_market:
+                    market_apy = float(market.state['supplyApy'])
+                    capped_markets.append((market, market_apy))
+            
+            # Sort by APY descending
+            capped_markets.sort(key=lambda x: x[1], reverse=True)
+            
+            if not capped_markets:
                 logger.info(f"No capped markets available for {symbol}")
                 continue
-                
-            best_cap = caps_by_market[best_market.unique_key]
-            best_apy = float(best_market.state['supplyApy'])
             
             # Check each position for potential reallocation
             for pos in group['markets']:
@@ -94,16 +111,52 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     continue
                     
                 current_apy = float(market.state['supplyApy'])
+                position_amount_wei = int(pos.supply_assets)
                 
-                # If current market has lower APY, consider moving funds
-                if current_apy < best_apy and pos.unique_key != best_market.unique_key:
-                    # Create withdrawal action
+                # Try each capped market in order of APY until we find one with capacity
+                for target_market, target_apy in capped_markets:
+                    # Skip if current market has higher APY
+                    if current_apy >= target_apy:
+                        logger.info(
+                            f"Keeping position in market ({pos.unique_key[:10]}) "
+                            f"with APY {current_apy:.2%} >= {target_apy:.2%}"
+                        )
+                        break  # No point trying lower APY markets
+                        
+                    if pos.unique_key == target_market.unique_key:
+                        continue  # Skip same market
+                    
+                    # Calculate maximum amount that can be moved to this market (in wei)
+                    target_market_supply_wei = int(target_market.state.get('supplyAssets', 0))
+                    max_allocation_wei = int(target_market_supply_wei * self.max_market_impact_ratio)
+                    current_allocation_wei = self.market_allocations[target_market.unique_key]
+                    remaining_allocation_wei = max_allocation_wei - current_allocation_wei
+                    
+                    if remaining_allocation_wei <= 0:
+                        logger.info(
+                            f"Market {target_market.unique_key[:10]} full - "
+                            f"Already at maximum allocation of "
+                            f"{TokenAmount.from_wei(max_allocation_wei, decimals).to_units()} {symbol}"
+                        )
+                        continue  # Try next market
+                    
+                    # Calculate amount to move (limited by market impact)
+                    move_amount_wei = min(position_amount_wei, remaining_allocation_wei)
+                    
+                    if move_amount_wei <= 0:
+                        continue  # Try next market
+                    
+                    target_cap = caps_by_market[target_market.unique_key]
+                    move_amount = TokenAmount.from_wei(move_amount_wei, decimals)
+                    
+                    # Create withdrawal action - use shares if moving entire position
+                    use_max_shares = move_amount_wei >= position_amount_wei
                     withdrawal = MarketAction.create_withdrawal(
                         market_id=pos.unique_key,
                         position=pos,
                         market=market,
-                        use_max_shares=True,  # Use shares for withdrawal
-                        target_cap=best_cap
+                        use_max_shares=use_max_shares,
+                        target_cap=target_cap
                     )
                     
                     # Combine with existing withdrawal if any
@@ -113,30 +166,36 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                             'shares': withdrawal.shares,
                             'amount': withdrawal.amount,
                             'position': pos,
-                            'target_cap': best_cap
+                            'target_cap': target_cap
                         })
                     else:
                         market_withdrawals['shares'] += withdrawal.shares
+                        market_withdrawals['amount'] += withdrawal.amount
                     
                     # Track supply action
-                    supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
-                    market_supplies = supplies_by_market[best_market.unique_key]
+                    market_supplies = supplies_by_market[target_market.unique_key]
                     if market_supplies['amount'] is None:
                         market_supplies.update({
-                            'amount': supply_amount,
+                            'amount': move_amount,
                             'position': pos,
-                            'target_cap': best_cap,
+                            'target_cap': target_cap,
                             'decimals': decimals
                         })
                     else:
-                        market_supplies['amount'] += supply_amount
+                        market_supplies['amount'] += move_amount
+                    
+                    # Update market allocation tracking (in wei)
+                    self.market_allocations[target_market.unique_key] += move_amount_wei
                     
                     logger.info(
-                        f"Move {supply_amount.to_units()} {symbol} from "
+                        f"Move {move_amount.to_units()} {symbol} from "
                         f"market ({pos.unique_key[:10]})({current_apy:.2%}) to "
-                        f"market ({best_market.unique_key[:10]})({best_apy:.2%})"
+                        f"market ({target_market.unique_key[:10]})({target_apy:.2%}) "
+                        f"[{TokenAmount.from_wei(self.market_allocations[target_market.unique_key], decimals).to_units()}/"
+                        f"{TokenAmount.from_wei(max_allocation_wei, decimals).to_units()} allocated]"
                     )
-        
+                    break  # Successfully moved to this market, stop trying others
+
         # Create final list of actions
         actions = []
         

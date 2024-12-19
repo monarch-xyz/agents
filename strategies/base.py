@@ -135,12 +135,7 @@ class BaseStrategy:
             token_addr = token['address']
             decimals = int(token.get('decimals', 18))
 
-            min_asset = TokenAmount.from_units(1, decimals)
-            
-            # Skip dust positions
             supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
-            if supply_amount <= min_asset:
-                continue
                 
             if not grouped[token_addr]['loan_token']:
                 grouped[token_addr]['loan_token'] = token

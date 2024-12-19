@@ -3,7 +3,7 @@ import logging
 from typing import List, Optional, Dict
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
-from models.morpho_data import UserMarketData, Market
+from models.morpho_data import UserMarketData, Market, MarketPosition
 from queries.morpho_queries import GET_USER_MARKET_POSITIONS, GET_MARKETS
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,21 @@ class MorphoClient:
                 variable_values={"address": address, "chainId": chain_id}
             )
             
-            return UserMarketData.from_graphql(result['userByAddress'])
+            # Get raw user data
+            user_data = result['userByAddress']
+            
+            # Filter out empty positions before creating UserMarketData
+            if 'positions' in user_data:
+                user_data['positions'] = [
+                    pos for pos in user_data['positions']
+                    if (
+                        int(pos.get('supplyAssets', 0)) > 0 or 
+                        int(pos.get('supplyShares', 0)) > 0
+                    )
+                ]
+                logger.debug(f"Filtered to {len(user_data['positions'])} non-empty positions")
+            
+            return UserMarketData.from_graphql(user_data)
             
         except Exception as e:
             logger.error(f"Error fetching user positions from Morpho: {str(e)}")
