@@ -58,16 +58,6 @@ query getUserMarketPositions($address: String!, $chainId: Int) {
                     fee
                     timestamp
                     rateAtUTarget
-                    rewards {
-                        yearlySupplyTokens
-                        asset {
-                            address
-                            priceUsd
-                            spotPriceEth
-                        }
-                        amountPerSuppliedToken
-                        amountPerBorrowedToken
-                    }
                     monthlySupplyApy
                     monthlyBorrowApy
                     dailySupplyApy
@@ -217,16 +207,6 @@ query getMarkets($first: Int, $where: MarketFilters) {
                 fee
                 timestamp
                 rateAtUTarget
-                rewards {
-                    yearlySupplyTokens
-                    asset {
-                        address
-                        priceUsd
-                        spotPriceEth
-                    }
-                    amountPerSuppliedToken
-                    amountPerBorrowedToken
-                }
                 monthlySupplyApy
                 monthlyBorrowApy
                 dailySupplyApy

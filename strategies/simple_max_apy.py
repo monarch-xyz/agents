@@ -1,9 +1,12 @@
-from decimal import Decimal
+import logging
 from typing import List, Dict, Optional
-from models.morpho_data import MarketPosition
+from web3 import Web3
+from eth_typing import Wei
+from models.morpho_data import MarketPosition, Market
 from models.user_data import MarketCap
 from .base import BaseStrategy, MarketAction, ReallocationStrategy
 
+logger = logging.getLogger(__name__)
 
 class SimpleMaxAPYStrategy(BaseStrategy):
     """Simple strategy that reallocates based on market caps and APY"""
@@ -12,7 +15,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         self,
         positions: List[MarketPosition],
         market_caps: List[MarketCap],
-        market_data: Optional[Dict] = None
+        market_data: Optional[Dict[str, Market]] = None
     ) -> ReallocationStrategy:
         """
         Calculate reallocation strategy based on current positions and caps
@@ -20,55 +23,94 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         Args:
             positions: List of current market positions
             market_caps: List of market caps set by the user
-            market_data: Additional market data (prices, APY, etc.) for future use
+            market_data: Dictionary of markets by uniqueKey
             
         Returns:
             ReallocationStrategy with list of actions to take
         """
+        if not market_data:
+            return ReallocationStrategy(actions=[], total_reallocation_value=Wei(0))
+            
+        # Step 1: Group positions by loan token
+        grouped_positions = self.process_positions(positions, market_data)
+        
+        # Fix market cap IDs (remove leading //)
+        fixed_caps = []
+        for cap in market_caps:
+            if cap.market_id.startswith('//'):
+                cap.market_id = '0x' + cap.market_id[2:]
+            fixed_caps.append(cap)
+            
+        caps_by_market = {cap.market_id: cap for cap in fixed_caps}
         actions = []
-        total_reallocation_value = Decimal('0')
+        total_asset = Wei(0)
         
-        # Create lookup dictionaries
-        positions_by_market = {pos.unique_key: pos for pos in positions}
-        caps_by_market = {cap.market_id: cap for cap in market_caps}
-        
-        # Calculate required actions for each position
-        for market_id, position in positions_by_market.items():
-            cap = caps_by_market.get(market_id)
-            if not cap:
+        # Process each token group
+        for group in grouped_positions:
+            token = group['loan_token']
+            token_addr = token['address']
+            symbol = token['symbol']
+            decimals = int(token.get('decimals', 18))  # Default to 18 if not specified
+            
+            logger.info(f"\nProcessing {symbol} positions (token: {token_addr}):")
+            
+            # Get available markets for this token
+            available_markets = self.filter_available_markets(token_addr, market_data)
+            if not available_markets:
+                logger.info(f"No available markets for {symbol}")
                 continue
                 
-            current_value = position.supply_assets_usd
-            target_value = Decimal(str(cap.cap))
-            
-            if current_value > target_value:
-                # Need to withdraw
-                withdraw_amount = current_value - target_value
-                actions.append(MarketAction(
-                    market_id=market_id,
-                    action_type='withdraw',
-                    amount=withdraw_amount,
-                    current_position=position,
-                    target_cap=cap
-                ))
-                total_reallocation_value += withdraw_amount
+            # Find best market (highest APY) that has a cap
+            best_market = None
+            for market in available_markets:
+                if market.unique_key in caps_by_market:
+                    best_market = market
+                    break
+                    
+            if not best_market:
+                logger.info(f"No capped markets available for {symbol}")
+                continue
                 
-            elif current_value < target_value:
-                # Need to supply
-                supply_amount = target_value - current_value
-                actions.append(MarketAction(
-                    market_id=market_id,
-                    action_type='supply',
-                    amount=supply_amount,
-                    current_position=position,
-                    target_cap=cap
-                ))
-                total_reallocation_value += supply_amount
-        
-        # Sort actions by amount (largest first) for better execution
-        actions.sort(key=lambda x: x.amount, reverse=True)
+            best_cap = caps_by_market[best_market.unique_key]
+            best_apy = float(best_market.state['supplyApy'])
+            
+            # Check each position for potential reallocation
+            for pos in group['markets']:
+                market = market_data.get(pos.unique_key)
+                if not market:
+                    continue
+                    
+                current_apy = float(market.state['supplyApy'])
+                
+                # If current market has lower APY, consider moving funds
+                if current_apy < best_apy and pos.unique_key != best_market.unique_key:
+                    amount = Wei(int(pos.supply_asset))
+                    human_amount = Web3.from_wei(amount, 'ether')
+                    logger.info(
+                        f"Move {human_amount:.18f} {symbol} from "
+                        f"market ({pos.unique_key[:10]})({current_apy:.2%}) to "
+                        f"market ({best_market.unique_key[:10]})({best_apy:.2%})"
+                    )
+                    
+                    actions.append(MarketAction(
+                        market_id=pos.unique_key,
+                        action_type='withdraw',
+                        amount=amount,
+                        current_position=pos,
+                        target_cap=best_cap
+                    ))
+                    
+                    actions.append(MarketAction(
+                        market_id=best_market.unique_key,
+                        action_type='supply',
+                        amount=amount,
+                        current_position=pos,
+                        target_cap=best_cap
+                    ))
+                    
+                    total_asset = Wei(int(total_asset) + int(amount))
         
         return ReallocationStrategy(
             actions=actions,
-            total_reallocation_value=total_reallocation_value
+            total_reallocation_value=total_asset
         )

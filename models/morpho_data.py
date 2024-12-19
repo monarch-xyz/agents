@@ -12,18 +12,6 @@ class Asset:
     decimals: int
     price_usd: Decimal
 
-@dataclass
-class RewardAsset:
-    address: str
-    price_usd: Decimal
-    spot_price_eth: Decimal
-
-@dataclass
-class Reward:
-    yearly_supply_tokens: str
-    asset: RewardAsset
-    amount_per_supplied_token: str
-    amount_per_borrowed_token: int
 
 @dataclass
 class MarketState:
@@ -43,7 +31,6 @@ class MarketState:
     fee: int
     timestamp: int
     rate_at_u_target: Decimal
-    rewards: List[Reward]
     monthly_supply_apy: Decimal
     monthly_borrow_apy: Decimal
     daily_supply_apy: Decimal
@@ -198,19 +185,6 @@ class UserMarketData:
                     fee=pos['market']['state']['fee'],
                     timestamp=pos['market']['state']['timestamp'],
                     rate_at_u_target=Decimal(str(pos['market']['state']['rateAtUTarget'])),
-                    rewards=[
-                        Reward(
-                            yearly_supply_tokens=r['yearlySupplyTokens'],
-                            asset=RewardAsset(
-                                address=r['asset']['address'],
-                                price_usd=Decimal(str(r['asset']['priceUsd'])),
-                                spot_price_eth=Decimal(str(r['asset']['spotPriceEth']))
-                            ),
-                            amount_per_supplied_token=r['amountPerSuppliedToken'],
-                            amount_per_borrowed_token=r['amountPerBorrowedToken']
-                        )
-                        for r in pos['market']['state']['rewards']
-                    ],
                     monthly_supply_apy=Decimal(str(pos['market']['state']['monthlySupplyApy'])),
                     monthly_borrow_apy=Decimal(str(pos['market']['state']['monthlyBorrowApy'])),
                     daily_supply_apy=Decimal(str(pos['market']['state']['dailySupplyApy'])),

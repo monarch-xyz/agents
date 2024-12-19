@@ -23,10 +23,10 @@ class AutomationService:
         rebalancer_address = get_address_from_private_key()
         return await self.monarch_client.get_authorized_users(rebalancer_address)
 
-    async def fetch_markets(self, chain_id: int = 1) -> Dict[str, Market]:
+    async def fetch_markets(self) -> Dict[str, Market]:
         """Fetch all markets and cache them by uniqueKey"""
         logger.info("Fetching all markets data...")
-        markets = await self.morpho_client.get_markets(chain_id=chain_id)
+        markets = await self.morpho_client.get_markets()
         
         # Cache markets by uniqueKey for easy lookup
         self.markets_by_id = {
@@ -68,7 +68,7 @@ class AutomationService:
             Tuple of (positions, reallocation_strategy)
             If no reallocation is needed, strategy will be None
         """
-        positions = await self.morpho_client.get_user_positions(user.address)
+        positions = await self.morpho_client.get_user_positions(user.address, 8453)
         
         # Calculate reallocation strategy
         strategy_result = self.strategy.calculate_reallocation(

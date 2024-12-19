@@ -15,7 +15,7 @@ class MorphoClient:
         self.transport = AIOHTTPTransport(url=self.MORPHO_API_ENDPOINT)
         self.client = Client(transport=self.transport, fetch_schema_from_transport=True)
 
-    async def get_user_positions(self, address: str, chain_id: int = 1) -> UserMarketData:
+    async def get_user_positions(self, address: str, chain_id: 8453) -> UserMarketData:
         """Fetch user's positions from Morpho API
         
         Args:
@@ -39,7 +39,7 @@ class MorphoClient:
             logger.error(f"Error fetching user positions from Morpho: {str(e)}")
             raise
             
-    async def get_markets(self, chain_id: int = 1, first: int = 100) -> List[Market]:
+    async def get_markets(self, first: int = 100) -> List[Market]:
         """Fetch all markets from Morpho API
         
         Args:
