@@ -37,15 +37,23 @@ class MorphoClient:
             user_data = result['userByAddress']
             
             # Filter out empty positions before creating UserMarketData
-            if 'positions' in user_data:
-                user_data['positions'] = [
-                    pos for pos in user_data['positions']
-                    if (
-                        int(pos.get('supplyAssets', 0)) > 0 or 
-                        int(pos.get('supplyShares', 0)) > 0
+            if 'marketPositions' in user_data:
+                filtered_positions = []
+                for pos in user_data['marketPositions']:
+                    supply_assets = int(pos.get('supplyAssets', 0))
+                    logger.debug(
+                        f"Position {pos['market']['uniqueKey'][:10]} has "
+                        f"supplyAssets: {supply_assets}"
                     )
-                ]
-                logger.debug(f"Filtered to {len(user_data['positions'])} non-empty positions")
+                    if supply_assets > 0:
+                        filtered_positions.append(pos)
+                    else:
+                        logger.debug(f"Filtering out empty position {pos['market']['uniqueKey'][:10]}")
+                
+                user_data['marketPositions'] = filtered_positions
+                logger.info(
+                    f"Filtered to {len(filtered_positions)} non-empty positions "
+                )
             
             return UserMarketData.from_graphql(user_data)
             

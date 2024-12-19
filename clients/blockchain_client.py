@@ -45,12 +45,6 @@ class BlockchainClient:
         )
         
         logger.info(f"Initialized blockchain client with address: {self.account.address}")
-
-    async def get_user_positions(self, user_address):
-        """Fetch user positions from the blockchain"""
-        # Implement blockchain-specific logic to fetch positions
-        # This is a placeholder - implement actual contract calls
-        return []
         
     async def simulate_transaction(
         self,

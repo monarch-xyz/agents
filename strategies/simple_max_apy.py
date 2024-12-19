@@ -113,6 +113,12 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                 current_apy = float(market.state['supplyApy'])
                 position_amount_wei = int(pos.supply_assets)
                 
+                logger.info(
+                    f"Processing position in market ({pos.unique_key[:10]}) "
+                    f"with APY {current_apy:.2%}"
+                    f" - {TokenAmount.from_wei(position_amount_wei, decimals).to_units()} {symbol}"
+                )
+                
                 # Try each capped market in order of APY until we find one with capacity
                 for target_market, target_apy in capped_markets:
                     # Skip if current market has higher APY
