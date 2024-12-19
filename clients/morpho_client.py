@@ -2,32 +2,38 @@ import os
 import logging
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
+from models.morpho_data import UserMarketData
+from queries.morpho_queries import GET_USER_MARKET_POSITIONS
 
 logger = logging.getLogger(__name__)
 
 class MorphoClient:
+    MORPHO_API_ENDPOINT = "https://blue-api.morpho.org/graphql"  # TODO: Move to config if needed
+    
     def __init__(self):
-        endpoint = os.getenv('MORPHO_API_ENDPOINT')
-        self.transport = AIOHTTPTransport(url=endpoint)
+        self.transport = AIOHTTPTransport(url=self.MORPHO_API_ENDPOINT)
         self.client = Client(transport=self.transport, fetch_schema_from_transport=True)
 
-    async def get_authorized_users(self):
-        """Fetch users who have authorized the bot from Morpho API"""
-        try:
-            # Define your GraphQL query
-            query = gql("""
-                query GetAuthorizedUsers {
-                    authorizedUsers {
-                        address
-                        timestamp
-                    }
-                }
-            """)
+    async def get_user_positions(self, address: str, chain_id: int = 1) -> UserMarketData:
+        """Fetch user's positions from Morpho API
+        
+        Args:
+            address: User's ethereum address
+            chain_id: Chain ID (default: 1 for Ethereum mainnet)
             
-            # Execute the query
-            result = await self.client.execute_async(query)
-            return [user['address'] for user in result.get('authorizedUsers', [])]
+        Returns:
+            UserMarketData: User's positions and transactions
+        """
+        try:
+            query = gql(GET_USER_MARKET_POSITIONS)
+            
+            result = await self.client.execute_async(
+                query,
+                variable_values={"address": address, "chainId": chain_id}
+            )
+            
+            return UserMarketData.from_graphql(result['userByAddress'])
             
         except Exception as e:
-            logger.error(f"Error fetching authorized users from Morpho: {str(e)}")
-            return []
+            logger.error(f"Error fetching user positions from Morpho: {str(e)}")
+            raise

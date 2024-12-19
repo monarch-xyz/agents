@@ -4,6 +4,7 @@ from typing import List
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 from models.user_data import UserAuthorization
+from queries.monarch_queries import GET_AUTHORIZED_USERS
 
 logger = logging.getLogger(__name__)
 
@@ -24,22 +25,7 @@ class MonarchClient:
             List[UserAuthorization]: List of users and their market caps
         """
         try:
-            # Define the GraphQL query
-            query = gql("""
-                query GetAuthorizedUsers($rebalancer: String!) {
-                    users(filter: { rebalancer: { equalTo: $rebalancer } }) {
-                        nodes {
-                            id
-                            marketCaps {
-                                nodes {
-                                    marketId
-                                    cap
-                                }
-                            }
-                        }
-                    }
-                }
-            """)
+            query = gql(GET_AUTHORIZED_USERS)
             
             # Execute the query with variables
             result = await self.client.execute_async(
