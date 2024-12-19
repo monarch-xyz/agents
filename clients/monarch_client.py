@@ -9,7 +9,7 @@ from queries.monarch_queries import GET_AUTHORIZED_USERS
 logger = logging.getLogger(__name__)
 
 class MonarchClient:
-    SUBQUERY_ENDPOINT = "https://api.subquery.network/sq/antoncoding/monarch-agent-base"
+    SUBQUERY_ENDPOINT = "https://api.subquery.network/sq/antoncoding/monarch-agent-base-v2"
     
     def __init__(self):
         self.transport = AIOHTTPTransport(url=self.SUBQUERY_ENDPOINT)
