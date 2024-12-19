@@ -1,5 +1,6 @@
 import logging
 from typing import List, Dict, Optional
+from collections import defaultdict
 from models.morpho_data import MarketPosition, Market
 from models.user_data import MarketCap
 from utils.token_amount import TokenAmount
@@ -28,7 +29,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             ReallocationStrategy with list of actions to take
         """
         if not market_data:
-            return ReallocationStrategy(actions=[], total_reallocation_value=TokenAmount.from_wei(0))
+            return ReallocationStrategy(actions=[])
             
         # Step 1: Group positions by loan token
         grouped_positions = self.process_positions(positions, market_data)
@@ -41,8 +42,21 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             fixed_caps.append(cap)
             
         caps_by_market = {cap.market_id: cap for cap in fixed_caps}
-        actions = []
-        total_asset = None  # Will be initialized with first token
+        
+        # Track actions by market to combine them
+        withdrawals_by_market = defaultdict(lambda: {
+            'amount': None,
+            'shares': None,
+            'position': None,
+            'target_cap': None
+        })
+        
+        supplies_by_market = defaultdict(lambda: {
+            'amount': None,
+            'position': None,
+            'target_cap': None,
+            'decimals': None
+        })
         
         # Process each token group
         for group in grouped_positions:
@@ -83,35 +97,71 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                 
                 # If current market has lower APY, consider moving funds
                 if current_apy < best_apy and pos.unique_key != best_market.unique_key:
-                    amount = TokenAmount.from_wei(pos.supply_assets, decimals)
+                    # Create withdrawal action
+                    withdrawal = MarketAction.create_withdrawal(
+                        market_id=pos.unique_key,
+                        position=pos,
+                        market=market,
+                        use_max_shares=True,  # Use shares for withdrawal
+                        target_cap=best_cap
+                    )
+                    
+                    # Combine with existing withdrawal if any
+                    market_withdrawals = withdrawals_by_market[pos.unique_key]
+                    if market_withdrawals['shares'] is None:
+                        market_withdrawals.update({
+                            'shares': withdrawal.shares,
+                            'amount': withdrawal.amount,
+                            'position': pos,
+                            'target_cap': best_cap
+                        })
+                    else:
+                        market_withdrawals['shares'] += withdrawal.shares
+                    
+                    # Track supply action
+                    supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
+                    market_supplies = supplies_by_market[best_market.unique_key]
+                    if market_supplies['amount'] is None:
+                        market_supplies.update({
+                            'amount': supply_amount,
+                            'position': pos,
+                            'target_cap': best_cap,
+                            'decimals': decimals
+                        })
+                    else:
+                        market_supplies['amount'] += supply_amount
+                    
                     logger.info(
-                        f"Move {amount.to_units()} {symbol} from "
+                        f"Move {supply_amount.to_units()} {symbol} from "
                         f"market ({pos.unique_key[:10]})({current_apy:.2%}) to "
                         f"market ({best_market.unique_key[:10]})({best_apy:.2%})"
                     )
-                    
-                    actions.append(MarketAction(
-                        market_id=pos.unique_key,
-                        action_type='withdraw',
-                        amount=amount,
-                        current_position=pos,
-                        target_cap=best_cap
-                    ))
-                    
-                    actions.append(MarketAction(
-                        market_id=best_market.unique_key,
-                        action_type='supply',
-                        amount=amount,
-                        current_position=pos,
-                        target_cap=best_cap
-                    ))
-                    
-                    if total_asset is None:
-                        total_asset = amount
-                    else:
-                        total_asset += amount
         
-        return ReallocationStrategy(
-            actions=actions,
-            total_reallocation_value=total_asset if total_asset else TokenAmount.from_wei(0)
-        )
+        # Create final list of actions
+        actions = []
+        
+        # Add combined withdrawals
+        for market_id, withdrawal in withdrawals_by_market.items():
+            if withdrawal['shares'] is not None:
+                actions.append(MarketAction(
+                    market_id=market_id,
+                    action_type='withdraw',
+                    amount=withdrawal['amount'],
+                    shares=withdrawal['shares'],
+                    current_position=withdrawal['position'],
+                    target_cap=withdrawal['target_cap']
+                ))
+        
+        # Add combined supplies
+        for market_id, supply in supplies_by_market.items():
+            if supply['amount'] is not None:
+                actions.append(MarketAction(
+                    market_id=market_id,
+                    action_type='supply',
+                    amount=supply['amount'],
+                    shares=TokenAmount.from_wei(0, 0),
+                    current_position=supply['position'],
+                    target_cap=supply['target_cap']
+                ))
+        
+        return ReallocationStrategy(actions=actions)

@@ -81,7 +81,7 @@ class AutomationService:
             logger.info(f"No reallocation needed for {user.address}")
             return positions, None
             
-        logger.info(f"Reallocation needed for {user.address}. Total value: {strategy_result.total_reallocation_value}")
+        logger.info(f"Reallocation needed for {user.address}")
         for action in strategy_result.actions:
             market = self.markets_by_id.get(action.market_id)
             if market:
