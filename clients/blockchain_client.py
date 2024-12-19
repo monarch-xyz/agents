@@ -3,6 +3,7 @@ import json
 import logging
 from web3 import Web3
 from web3.middleware import geth_poa_middleware
+from web3.gas_strategies.rpc import rpc_gas_price_strategy
 from eth_account import Account
 from typing import Dict, Optional, Tuple
 from web3.types import TxReceipt
@@ -23,6 +24,9 @@ class BlockchainClient:
         
         # Add PoA middleware for Base chain
         self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+        
+        # Set gas price strategy to use RPC
+        self.w3.eth.set_gas_price_strategy(rpc_gas_price_strategy)
         
         # Initialize account from private key
         private_key = os.getenv('PRIVATE_KEY')
@@ -156,17 +160,50 @@ class BlockchainClient:
             logger.error(f"Transaction failed: {str(e)}")
             raise
 
-    async def send_rebalance_transaction(
-        self,
-        tx_data: Dict
-    ) -> Tuple[str, TxReceipt]:
-        """
-        Send a rebalance transaction
-        
-        Args:
-            tx_data: Transaction data from blockchain service
+    async def send_rebalance_transaction(self, tx_data: Dict) -> Tuple[str, TxReceipt]:
+        """Send a rebalance transaction"""
+        try:
+            # Let Base handle gas estimation
+            if 'gas' in tx_data:
+                del tx_data['gas']
+            if 'maxFeePerGas' in tx_data:
+                del tx_data['maxFeePerGas']
+            if 'maxPriorityFeePerGas' in tx_data:
+                del tx_data['maxPriorityFeePerGas']
+                
+            # Get gas price from RPC
+            gas_price = self.w3.eth.generate_gas_price()
+            if gas_price is None:
+                gas_price = self.w3.eth.gas_price
             
-        Returns:
-            Tuple of (transaction hash, transaction receipt)
-        """
-        return await self.send_transaction(tx_data)
+            # Add 10% buffer to gas price for faster confirmation
+            gas_price = int(gas_price * 1.1)
+            
+            logger.debug(f"Using gas price: {gas_price} wei")
+            tx_data['gasPrice'] = gas_price
+            
+            # Estimate gas with a 20% buffer
+            estimated_gas = self.w3.eth.estimate_gas(tx_data)
+            tx_data['gas'] = int(estimated_gas * 1.2)
+            
+            logger.debug(f"Estimated gas: {tx_data['gas']}")
+            
+            # Get nonce
+            tx_data['nonce'] = self.w3.eth.get_transaction_count(self.account.address)
+            
+            # Sign transaction
+            signed_tx = self.w3.eth.account.sign_transaction(tx_data, self.account.key)
+            
+            # Send transaction
+            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            logger.info(f"Transaction sent with hash: {tx_hash.hex()}")
+            
+            # Wait for receipt
+            tx_receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            logger.info(f"Transaction mined in block: {tx_receipt['blockNumber']}")
+            
+            return tx_hash.hex(), tx_receipt
+            
+        except Exception as e:
+            logger.error(f"Error sending transaction: {str(e)}")
+            raise

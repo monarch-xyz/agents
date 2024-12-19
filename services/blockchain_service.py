@@ -132,6 +132,10 @@ class BlockchainService:
             logger.debug(f"to_markets: {[str(m) for m in to_markets_params]}")
             
             # Build transaction data
+            # Get current gas price from Base
+            gas_price = self.blockchain_client.w3.eth.gas_price
+            logger.debug(f"Current gas price: {gas_price}")
+
             tx_data = self.blockchain_client.agent_contract.functions.rebalance(
                 Web3.to_checksum_address(user_address),  # onBehalf
                 token_address,  # token
@@ -139,6 +143,7 @@ class BlockchainService:
                 to_markets_params     # toMarkets array [(market_params, assets, shares), ...]
             ).build_transaction({
                 'from': self.blockchain_client.account.address,
+                'gasPrice': gas_price,  # Use current gas price from Base
             })
             
             logger.info("Transaction data composed, sending to blockchain...")
