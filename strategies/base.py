@@ -140,7 +140,6 @@ class BaseStrategy:
             # Skip dust positions
             supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
             if supply_amount <= min_asset:
-                logger.info(f'Skipping dust position {pos.unique_key} (amount: {supply_amount.to_units()})')
                 continue
                 
             if not grouped[token_addr]['loan_token']:

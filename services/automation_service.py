@@ -2,8 +2,11 @@ import os
 import logging
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
+from web3.types import TxReceipt
 from clients.monarch_client import MonarchClient
 from clients.morpho_client import MorphoClient
+from clients.blockchain_client import BlockchainClient
+from services.blockchain_service import BlockchainService
 from models.user_data import UserAuthorization
 from models.morpho_data import UserMarketData, Market
 from strategies.simple_max_apy import SimpleMaxAPYStrategy, ReallocationStrategy
@@ -15,6 +18,8 @@ class AutomationService:
     def __init__(self):
         self.monarch_client = MonarchClient()
         self.morpho_client = MorphoClient()
+        self.blockchain_client = BlockchainClient()
+        self.blockchain_service = BlockchainService(self.blockchain_client)
         self.strategy = SimpleMaxAPYStrategy()
         self.markets_by_id: Dict[str, Market] = {}  # Cache markets by uniqueKey
         
@@ -93,34 +98,73 @@ class AutomationService:
                 
         return positions, strategy_result
 
-    async def execute_reallocation(self, strategy_result: ReallocationStrategy):
-        """Execute the reallocation actions"""
+    async def execute_reallocation(
+        self,
+        user_address: str,
+        strategy_result: ReallocationStrategy
+    ) -> Tuple[str, TxReceipt]:
+        """
+        Execute the reallocation actions
+        
+        Args:
+            user_address: Address of the user to rebalance for
+            strategy_result: Strategy containing actions to execute
+            
+        Returns:
+            Tuple of (transaction hash, transaction receipt)
+            
+        Raises:
+            Exception if transaction fails
+        """
         try:
-            # TODO: Execute the reallocation actions
-            pass
+            logger.info(f"Executing reallocation for user {user_address}")
+            
+            if not strategy_result.actions:
+                raise ValueError("No actions to execute")
+                
+            # Execute rebalance transaction
+            tx_hash, receipt = await self.blockchain_service.rebalance(
+                user_address=user_address,
+                actions=strategy_result.actions,
+                markets=self.markets_by_id
+            )
+            
+            # Log success
+            logger.info(
+                f"Reallocation executed successfully for {user_address}. "
+                f"Transaction: {tx_hash}"
+            )
+            
+            return tx_hash, receipt
+            
         except Exception as e:
-            logger.error(f"Error executing reallocation: {str(e)}")
+            logger.error(f"Failed to execute reallocation for {user_address}: {str(e)}")
             raise
 
     async def run(self):
         """Main automation loop"""
         try:
-            # 1. Get all markets data first
+            # Fetch latest market data
             await self.fetch_markets()
             
-            # 2. Get authorized users
-            authorized_users = await self.fetch_authorized_users()
-            logger.info(f"Found {len(authorized_users)} authorized users")
+            # Get authorized users
+            users = await self.fetch_authorized_users()
+            logger.info(f"Found {len(users)} authorized users")
             
-            # 3. Process each user
-            for user in authorized_users:
-                logger.info(f"Analyzing positions for {user.address}")
-                positions, strategy = await self.analyze_user_positions(user)
-                
-                # 4. Execute reallocation if needed
-                if strategy:
-                    await self.execute_reallocation(strategy)
-                
+            # Process each user
+            for user in users:
+                try:
+                    # Analyze positions and get reallocation strategy
+                    positions, strategy = await self.analyze_user_positions(user)
+                    
+                    # Execute reallocation if needed
+                    if strategy:
+                        await self.execute_reallocation(user.address, strategy)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing user {user.address}: {str(e)}")
+                    continue
+                    
         except Exception as e:
-            logger.error(f"Error in automation run: {str(e)}", exc_info=True)
+            logger.error(f"Automation run failed: {str(e)}")
             raise
