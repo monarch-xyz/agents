@@ -113,17 +113,16 @@ class Market:
 
 @dataclass
 class MarketPosition:
-    supply_shares: int
-    supply_assets: int
+    supply_shares: Decimal
+    supply_assets: Decimal
     supply_assets_usd: Decimal
-    borrow_shares: int
-    borrow_assets: int
+    borrow_shares: Decimal
+    borrow_assets: Decimal
     borrow_assets_usd: Decimal
     market: Market
 
 @dataclass
 class TransactionData:
-    assets_usd: Decimal
     shares: int
     assets: int
     market: dict  # Simplified market data for transactions
@@ -144,6 +143,8 @@ class UserMarketData:
     def from_graphql(cls, data: dict) -> 'UserMarketData':
         """Create UserMarketData from GraphQL response data"""
         market_positions = []
+        transactions = []
+
         for pos in data['marketPositions']:
             market = Market(
                 id=pos['market']['id'],
@@ -231,29 +232,35 @@ class UserMarketData:
             )
             
             market_positions.append(MarketPosition(
-                supply_shares=pos['supplyShares'],
-                supply_assets=pos['supplyAssets'],
+                supply_shares=Decimal(str(pos['supplyShares'])),
+                supply_assets=Decimal(str(pos['supplyAssets'])),
                 supply_assets_usd=Decimal(str(pos['supplyAssetsUsd'])),
-                borrow_shares=pos['borrowShares'],
-                borrow_assets=pos['borrowAssets'],
+                borrow_shares=Decimal(str(pos['borrowShares'])),
+                borrow_assets=Decimal(str(pos['borrowAssets'])),
                 borrow_assets_usd=Decimal(str(pos['borrowAssetsUsd'])),
                 market=market
             ))
 
-        transactions = [
-            Transaction(
-                hash=tx['hash'],
-                timestamp=tx['timestamp'],
-                type=tx['type'],
-                data=TransactionData(
-                    assets_usd=Decimal(str(tx['data']['assetsUsd'])),
-                    shares=tx['data']['shares'],
-                    assets=tx['data']['assets'],
-                    market=tx['data']['market']
-                )
-            )
-            for tx in data['transactions']
-        ]
+        # Only include transactions of specific types
+        VALID_TRANSACTION_TYPES = {'MarketSupply', 'MarketWithdraw'}
+        transactions = []
+        
+        if 'transactions' in data:
+            for tx in data['transactions']:
+                if tx['type'] not in VALID_TRANSACTION_TYPES:
+                    continue
+
+                transactions.append(
+                    Transaction(
+                        hash=tx['hash'],
+                        timestamp=tx['timestamp'],
+                        type=tx['type'],
+                        data=TransactionData(   
+                            shares=tx['data']['shares'],
+                            assets=tx['data']['assets'],
+                            market=tx['data']['market']
+                        )
+                    ))
 
         return cls(
             market_positions=market_positions,

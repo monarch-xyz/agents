@@ -30,8 +30,8 @@ class AutomationService:
 
     async def analyze_user_positions(self, user_address):
         """Analyze positions for a specific user"""
-        positions = await self.blockchain_client.get_user_positions(user_address)
-        # Add analysis logic here
+        positions = await self.morpho_client.get_user_positions(user_address)
+
         return positions
 
     async def execute_reallocation(self, user_address, strategy):

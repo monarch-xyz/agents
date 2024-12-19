@@ -4,13 +4,14 @@ import logging
 from dotenv import load_dotenv
 from services.automation_service import AutomationService
 import asyncio
+from utils.logging import setup_logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# )
+# logger = logging.getLogger(__name__)
 
 def run_automation():
     """Main function to run the automation process"""
@@ -18,9 +19,10 @@ def run_automation():
         service = AutomationService()
         asyncio.run(service.run())
     except Exception as e:
-        logger.error(f"Error in automation run: {str(e)}", exc_info=True)
+        logging.error(f"Error in automation run: {str(e)}", exc_info=True)
 
 def main():
+    setup_logging()  # Configure logging before anything else
     # Load environment variables
     load_dotenv()
     
@@ -28,7 +30,7 @@ def main():
     schedule.every(6).hours.do(run_automation)
     
     # Run once immediately on startup
-    logger.info("Starting initial automation run...")
+    logging.info("Starting initial automation run...")
     run_automation()
     
     # Keep the script running
