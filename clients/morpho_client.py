@@ -56,7 +56,7 @@ class MorphoClient:
                 query,
                 variable_values={
                     "first": first,
-                    "where": {"chainId": {"equalTo": chain_id}}
+                    "where": {"whitelisted": True, "chainId_in": [8453]}
                 }
             )
             
