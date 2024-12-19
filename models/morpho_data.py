@@ -120,6 +120,12 @@ class MarketPosition:
     borrow_assets: Decimal
     borrow_assets_usd: Decimal
     market: Market
+    unique_key: str
+
+    @property
+    def id(self) -> str:
+        """Get the unique market identifier"""
+        return self.unique_key
 
 @dataclass
 class TransactionData:
@@ -238,7 +244,8 @@ class UserMarketData:
                 borrow_shares=Decimal(str(pos['borrowShares'])),
                 borrow_assets=Decimal(str(pos['borrowAssets'])),
                 borrow_assets_usd=Decimal(str(pos['borrowAssetsUsd'])),
-                market=market
+                market=market,
+                unique_key=pos['market']['uniqueKey']
             ))
 
         # Only include transactions of specific types
