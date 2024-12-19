@@ -1,9 +1,8 @@
 import logging
 from typing import List, Dict, Optional
-from web3 import Web3
-from eth_typing import Wei
 from models.morpho_data import MarketPosition, Market
 from models.user_data import MarketCap
+from utils.token_amount import TokenAmount
 from .base import BaseStrategy, MarketAction, ReallocationStrategy
 
 logger = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             ReallocationStrategy with list of actions to take
         """
         if not market_data:
-            return ReallocationStrategy(actions=[], total_reallocation_value=Wei(0))
+            return ReallocationStrategy(actions=[], total_reallocation_value=TokenAmount.from_wei(0))
             
         # Step 1: Group positions by loan token
         grouped_positions = self.process_positions(positions, market_data)
@@ -43,14 +42,14 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             
         caps_by_market = {cap.market_id: cap for cap in fixed_caps}
         actions = []
-        total_asset = Wei(0)
+        total_asset = None  # Will be initialized with first token
         
         # Process each token group
         for group in grouped_positions:
             token = group['loan_token']
             token_addr = token['address']
             symbol = token['symbol']
-            decimals = int(token.get('decimals', 18))  # Default to 18 if not specified
+            decimals = int(token.get('decimals', 18))
             
             logger.info(f"\nProcessing {symbol} positions (token: {token_addr}):")
             
@@ -84,10 +83,9 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                 
                 # If current market has lower APY, consider moving funds
                 if current_apy < best_apy and pos.unique_key != best_market.unique_key:
-                    amount = Wei(int(pos.supply_asset))
-                    human_amount = Web3.from_wei(amount, 'ether')
+                    amount = TokenAmount.from_wei(pos.supply_assets, decimals)
                     logger.info(
-                        f"Move {human_amount:.18f} {symbol} from "
+                        f"Move {amount.to_units()} {symbol} from "
                         f"market ({pos.unique_key[:10]})({current_apy:.2%}) to "
                         f"market ({best_market.unique_key[:10]})({best_apy:.2%})"
                     )
@@ -108,9 +106,12 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                         target_cap=best_cap
                     ))
                     
-                    total_asset = Wei(int(total_asset) + int(amount))
+                    if total_asset is None:
+                        total_asset = amount
+                    else:
+                        total_asset += amount
         
         return ReallocationStrategy(
             actions=actions,
-            total_reallocation_value=total_asset
+            total_reallocation_value=total_asset if total_asset else TokenAmount.from_wei(0)
         )
