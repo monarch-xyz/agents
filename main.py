@@ -3,6 +3,7 @@ import time
 import logging
 from dotenv import load_dotenv
 from services.automation_service import AutomationService
+import asyncio
 
 # Configure logging
 logging.basicConfig(
@@ -15,7 +16,7 @@ def run_automation():
     """Main function to run the automation process"""
     try:
         service = AutomationService()
-        service.run()
+        asyncio.run(service.run())
     except Exception as e:
         logger.error(f"Error in automation run: {str(e)}", exc_info=True)
 

@@ -17,7 +17,6 @@ pip install -r requirements.txt
 ```
 # API endpoints
 MORPHO_API_ENDPOINT=your_endpoint
-MONARCH_SUBQUERY_ENDPOINT=your_endpoint
 
 # Blockchain configuration
 WEB3_PROVIDER_URL=your_provider_url
