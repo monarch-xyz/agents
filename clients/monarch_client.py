@@ -9,7 +9,7 @@ from queries.monarch_queries import GET_AUTHORIZED_USERS
 logger = logging.getLogger(__name__)
 
 class MonarchClient:
-    SUBQUERY_ENDPOINT = "https://api.subquery.network/sq/antoncoding/monarch-agent-base-v2"
+    SUBQUERY_ENDPOINT = "https://api.studio.thegraph.com/query/94369/monarch-agent/version/latest"
     
     def __init__(self):
         self.transport = AIOHTTPTransport(url=self.SUBQUERY_ENDPOINT)
@@ -34,7 +34,7 @@ class MonarchClient:
             )
             
             # Parse the response into our data structures
-            users_data = result['users']['nodes']
+            users_data = result['users']
             return [UserAuthorization.from_graphql(user_data) for user_data in users_data]
             
         except Exception as e:

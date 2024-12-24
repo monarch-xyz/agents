@@ -20,7 +20,7 @@ class UserAuthorization:
                 market_id=cap['marketId'].replace('\\x', '0x'),  # Clean up the market ID format
                 cap=Decimal(cap['cap'])
             )
-            for cap in data['marketCaps']['nodes']
+            for cap in data['marketCaps']
         ]
         
         return cls(
