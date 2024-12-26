@@ -49,18 +49,6 @@ class AutomationService:
             
         # Log markets grouped by asset
         logger.info(f"Fetched {len(markets)} markets across {len(markets_by_asset)} assets:")
-        for asset_symbol, asset_markets in markets_by_asset.items():
-            logger.info(f"\n{asset_symbol} Markets ({len(asset_markets)}):")
-            for market in asset_markets:
-                state = market.state
-                collateral = market.collateral_asset['symbol']
-                logger.info(
-                    f"* {market.unique_key[:8]}: "
-                    f"{asset_symbol}-{collateral}, "
-                    f"APY: {state['supplyApy']:.2%}, "
-                    f"TVL: ${float(state['supplyAssetsUsd']):,.2f}, "
-                    f"Utilization: {float(state['utilization']):.2%}"
-                )
         
         return self.markets_by_id
 
