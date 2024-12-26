@@ -7,6 +7,7 @@ from clients.monarch_client import MonarchClient
 from clients.morpho_client import MorphoClient
 from clients.blockchain_client import BlockchainClient
 from services.blockchain_service import BlockchainService
+from services.notification_service import NotificationService
 from models.user_data import UserAuthorization
 from models.morpho_data import UserMarketData, Market
 from strategies.simple_max_apy import SimpleMaxAPYStrategy, ReallocationStrategy
@@ -21,6 +22,7 @@ class AutomationService:
         self.blockchain_client = BlockchainClient()
         self.blockchain_service = BlockchainService(self.blockchain_client)
         self.strategy = SimpleMaxAPYStrategy()
+        self.notification_service = NotificationService()
         self.markets_by_id: Dict[str, Market] = {}  # Cache markets by uniqueKey
         
     async def fetch_authorized_users(self) -> List[UserAuthorization]:
@@ -129,6 +131,14 @@ class AutomationService:
                 markets=self.markets_by_id
             )
             
+            # Send notification
+            await self.notification_service.notify_reallocation(
+                user_address=user_address,
+                actions=strategy_result.actions,
+                markets=self.markets_by_id,
+                tx_hash=tx_hash
+            )
+            
             # Log success
             logger.info(
                 f"Reallocation executed successfully for {user_address}. "
@@ -150,6 +160,9 @@ class AutomationService:
             # Get authorized users
             users = await self.fetch_authorized_users()
             logger.info(f"Found {len(users)} authorized users")
+
+            users_reallocation_needed = 0
+            users_reallocation_errors = 0
             
             # Process each user
             for user in users:
@@ -159,12 +172,18 @@ class AutomationService:
                     
                     # Execute reallocation if needed
                     if strategy:
+                        users_reallocation_needed += 1
                         await self.execute_reallocation(user.address, strategy)
+                        
                         
                 except Exception as e:
                     logger.error(f"Error processing user {user.address}: {str(e)}")
+                    users_reallocation_errors += 1
                     continue
                     
+            # Notify about the result
+            await self.notification_service.notify_run(users_reallocation_needed, users_reallocation_errors)
+            
         except Exception as e:
             logger.error(f"Automation run failed: {str(e)}")
             raise

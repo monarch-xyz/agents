@@ -1,5 +1,3 @@
-import schedule
-import time
 import logging
 from dotenv import load_dotenv
 from services.automation_service import AutomationService
@@ -26,17 +24,9 @@ def main():
     # Load environment variables
     load_dotenv()
     
-    # Schedule the job to run every 6 hours
-    schedule.every(6).hours.do(run_automation)
-    
-    # Run once immediately on startup
-    logging.info("Starting initial automation run...")
+    # Run automation once
+    logging.info("Starting automation run...")
     run_automation()
-    
-    # Keep the script running
-    while True:
-        schedule.run_pending()
-        time.sleep(60)  # Check every minute for pending jobs
 
 if __name__ == "__main__":
     main()
