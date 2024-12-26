@@ -14,4 +14,3 @@ python main.py
 
 # Deactivate virtual environment
 deactivate
-crontab -lcrontab -l
