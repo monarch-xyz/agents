@@ -47,9 +47,7 @@ class MorphoClient:
                     )
                     if supply_assets > 0:
                         filtered_positions.append(pos)
-                    else:
-                        logger.debug(f"Filtering out empty position {pos['market']['uniqueKey'][:10]}")
-                
+
                 user_data['marketPositions'] = filtered_positions
                 logger.info(
                     f"Filtered to {len(filtered_positions)} non-empty positions "

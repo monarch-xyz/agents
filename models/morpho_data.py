@@ -2,6 +2,9 @@ from dataclasses import dataclass
 from typing import List, Optional
 from decimal import Decimal
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Asset:
@@ -10,7 +13,6 @@ class Asset:
     symbol: str
     name: str
     decimals: int
-    price_usd: Decimal
 
 
 @dataclass
@@ -38,30 +40,76 @@ class MarketState:
     weekly_supply_apy: Decimal
     weekly_borrow_apy: Decimal
 
+    @classmethod
+    def from_dict(cls, data: dict) -> 'MarketState':
+        """Create MarketState from dict with safe decimal conversion"""
+        return cls(
+            borrow_assets=int(data['borrowAssets']),
+            supply_assets=int(data['supplyAssets']),
+            borrow_assets_usd=safe_decimal(data['borrowAssetsUsd']),
+            supply_assets_usd=safe_decimal(data['supplyAssetsUsd']),
+            borrow_shares=str(data['borrowShares']),
+            supply_shares=str(data['supplyShares']),
+            liquidity_assets=int(data['liquidityAssets']),
+            liquidity_assets_usd=safe_decimal(data['liquidityAssetsUsd']),
+            collateral_assets=str(data['collateralAssets']),
+            collateral_assets_usd=safe_decimal(data['collateralAssetsUsd']),
+            utilization=safe_decimal(data['utilization']),
+            supply_apy=safe_decimal(data['supplyApy']),
+            borrow_apy=safe_decimal(data['borrowApy']),
+            fee=int(data['fee']),
+            timestamp=int(data['timestamp']),
+            rate_at_u_target=safe_decimal(data['rateAtUTarget']),
+            monthly_supply_apy=safe_decimal(data['monthlySupplyApy']),
+            monthly_borrow_apy=safe_decimal(data['monthlyBorrowApy']),
+            daily_supply_apy=safe_decimal(data['dailySupplyApy']),
+            daily_borrow_apy=safe_decimal(data['dailyBorrowApy']),
+            weekly_supply_apy=safe_decimal(data['weeklySupplyApy']),
+            weekly_borrow_apy=safe_decimal(data['weeklyBorrowApy'])
+        )
+
+
+def safe_decimal(value, default="0") -> Decimal:
+    """Safely convert a value to Decimal, handling None and other edge cases"""
+    if value is None:
+        return Decimal(default)
+    try:
+        # Handle scientific notation and large numbers
+        return Decimal(str(value))
+    except (Decimal.InvalidOperation, Decimal.ConversionSyntax):
+        logger.warning(f"Could not convert {value} to Decimal, using default {default}")
+        return Decimal(default)
+
+
 @dataclass
 class DailyApys:
     net_supply_apy: Decimal
     net_borrow_apy: Decimal
+
 
 @dataclass
 class BadDebt:
     underlying: int
     usd: int
 
+
 @dataclass
 class Warning:
     type: str
     level: str
 
+
 @dataclass
 class Chain:
     id: int
+
 
 @dataclass
 class MorphoBlue:
     id: str
     address: str
     chain: Chain
+
 
 @dataclass
 class OracleFeed:
@@ -72,12 +120,14 @@ class OracleFeed:
     pair: List[str]
     vendor: str
 
+
 @dataclass
 class OracleData:
     base_feed_one: OracleFeed
     base_feed_two: OracleFeed
     quote_feed_one: OracleFeed
     quote_feed_two: Optional[OracleFeed]
+
 
 @dataclass
 class Market:
@@ -98,6 +148,7 @@ class Market:
     realized_bad_debt: BadDebt
     oracle: dict  # Can be expanded if needed
 
+
 @dataclass
 class MarketPosition:
     supply_shares: Decimal
@@ -114,11 +165,13 @@ class MarketPosition:
         """Get the unique market identifier"""
         return self.unique_key
 
+
 @dataclass
 class TransactionData:
     shares: int
     assets: int
     market: dict  # Simplified market data for transactions
+
 
 @dataclass
 class Transaction:
@@ -126,6 +179,7 @@ class Transaction:
     timestamp: int
     type: str
     data: TransactionData
+
 
 @dataclass
 class UserMarketData:
@@ -139,109 +193,102 @@ class UserMarketData:
         transactions = []
 
         for pos in data['marketPositions']:
-            market = Market(
-                id=pos['market']['id'],
-                lltv=pos['market']['lltv'],
-                unique_key=pos['market']['uniqueKey'],
-                irm_address=pos['market']['irmAddress'],
-                oracle_address=pos['market']['oracleAddress'],
-                collateral_price=pos['market']['collateralPrice'],
-                morpho_blue=MorphoBlue(
-                    id=pos['market']['morphoBlue']['id'],
-                    address=pos['market']['morphoBlue']['address'],
-                    chain=Chain(id=pos['market']['morphoBlue']['chain']['id'])
-                ),
-                oracle_info=pos['market']['oracleInfo'],
-                loan_asset=Asset(
-                    id=pos['market']['loanAsset']['id'],
-                    address=pos['market']['loanAsset']['address'],
-                    symbol=pos['market']['loanAsset']['symbol'],
-                    name=pos['market']['loanAsset']['name'],
-                    decimals=pos['market']['loanAsset']['decimals'],
-                    price_usd=Decimal(str(pos['market']['loanAsset']['priceUsd']))
-                ),
-                collateral_asset=Asset(
-                    id=pos['market']['collateralAsset']['id'],
-                    address=pos['market']['collateralAsset']['address'],
-                    symbol=pos['market']['collateralAsset']['symbol'],
-                    name=pos['market']['collateralAsset']['name'],
-                    decimals=pos['market']['collateralAsset']['decimals'],
-                    price_usd=Decimal(str(pos['market']['collateralAsset']['priceUsd']))
-                ),
-                state=MarketState(
-                    borrow_assets=pos['market']['state']['borrowAssets'],
-                    supply_assets=pos['market']['state']['supplyAssets'],
-                    borrow_assets_usd=Decimal(str(pos['market']['state']['borrowAssetsUsd'])),
-                    supply_assets_usd=Decimal(str(pos['market']['state']['supplyAssetsUsd'])),
-                    borrow_shares=pos['market']['state']['borrowShares'],
-                    supply_shares=pos['market']['state']['supplyShares'],
-                    liquidity_assets=pos['market']['state']['liquidityAssets'],
-                    liquidity_assets_usd=Decimal(str(pos['market']['state']['liquidityAssetsUsd'])),
-                    collateral_assets=pos['market']['state']['collateralAssets'],
-                    collateral_assets_usd=Decimal(str(pos['market']['state']['collateralAssetsUsd'])),
-                    utilization=Decimal(str(pos['market']['state']['utilization'])),
-                    supply_apy=Decimal(str(pos['market']['state']['supplyApy'])),
-                    borrow_apy=Decimal(str(pos['market']['state']['borrowApy'])),
-                    fee=pos['market']['state']['fee'],
-                    timestamp=pos['market']['state']['timestamp'],
-                    rate_at_u_target=Decimal(str(pos['market']['state']['rateAtUTarget'])),
-                    monthly_supply_apy=Decimal(str(pos['market']['state']['monthlySupplyApy'])),
-                    monthly_borrow_apy=Decimal(str(pos['market']['state']['monthlyBorrowApy'])),
-                    daily_supply_apy=Decimal(str(pos['market']['state']['dailySupplyApy'])),
-                    daily_borrow_apy=Decimal(str(pos['market']['state']['dailyBorrowApy'])),
-                    weekly_supply_apy=Decimal(str(pos['market']['state']['weeklySupplyApy'])),
-                    weekly_borrow_apy=Decimal(str(pos['market']['state']['weeklyBorrowApy']))
-                ),
-                daily_apys=DailyApys(
-                    net_supply_apy=Decimal(str(pos['market']['dailyApys']['netSupplyApy'])),
-                    net_borrow_apy=Decimal(str(pos['market']['dailyApys']['netBorrowApy']))
-                ),
-                warnings=[
-                    Warning(type=w['type'], level=w['level'])
-                    for w in pos['market']['warnings']
-                ],
-                bad_debt=BadDebt(
-                    underlying=pos['market']['badDebt']['underlying'],
-                    usd=pos['market']['badDebt']['usd']
-                ),
-                realized_bad_debt=BadDebt(
-                    underlying=pos['market']['realizedBadDebt']['underlying'],
-                    usd=pos['market']['realizedBadDebt']['usd']
-                ),
-                oracle=pos['market']['oracle']
-            )
-            
+
+            # log 
+            logger.debug(f"Sart iteration, Market ID \n: {pos['market']['id']}")
+
+            try: 
+                market = Market(
+                    id=pos['market']['id'],
+                    lltv=pos['market']['lltv'],
+                    unique_key=pos['market']['uniqueKey'],
+                    irm_address=pos['market']['irmAddress'],
+                    oracle_address=pos['market']['oracleAddress'],
+                    collateral_price=pos['market']['collateralPrice'],
+                    morpho_blue=MorphoBlue(
+                        id=pos['market']['morphoBlue']['id'],
+                        address=pos['market']['morphoBlue']['address'],
+                        chain=Chain(id=pos['market']['morphoBlue']['chain']['id'])
+                    ),
+                    oracle_info=pos['market']['oracleInfo'],
+                    loan_asset=Asset(
+                        id=pos['market']['loanAsset']['id'],
+                        address=pos['market']['loanAsset']['address'],
+                        symbol=pos['market']['loanAsset']['symbol'],
+                        name=pos['market']['loanAsset']['name'],
+                        decimals=pos['market']['loanAsset']['decimals'],
+                    ),
+                    collateral_asset=Asset(
+                        id=pos['market']['collateralAsset']['id'],
+                        address=pos['market']['collateralAsset']['address'],
+                        symbol=pos['market']['collateralAsset']['symbol'],
+                        name=pos['market']['collateralAsset']['name'],
+                        decimals=pos['market']['collateralAsset']['decimals'],
+                    ),
+                    state=MarketState.from_dict(pos['market']['state']),
+                    daily_apys=DailyApys(
+                        net_supply_apy=Decimal(str(pos['market']['dailyApys']['netSupplyApy'])),
+                        net_borrow_apy=Decimal(str(pos['market']['dailyApys']['netBorrowApy']))
+                    ),
+                    warnings=[
+                        Warning(type=w['type'], level=w['level'])
+                        for w in pos['market']['warnings']
+                    ],
+                    bad_debt=BadDebt(
+                        underlying=pos['market']['badDebt']['underlying'],
+                        usd=pos['market']['badDebt']['usd']
+                    ),
+                    realized_bad_debt=BadDebt(
+                        underlying=pos['market']['realizedBadDebt']['underlying'],
+                        usd=pos['market']['realizedBadDebt']['usd']
+                    ),
+                    oracle=pos['market']['oracle']
+                )
+            except Exception as e:
+                logger.error(f"Error converting market data: {str(e)}")
+                
+                # detail log market
+                logger.debug(f"Market data: {pos['market']}")
+                
+                continue
+
+            # log market data
+            logger.debug(f"Convert to Market complete \n")
+
             market_positions.append(MarketPosition(
-                supply_shares=Decimal(str(pos['supplyShares'])),
-                supply_assets=Decimal(str(pos['supplyAssets'])),
-                supply_assets_usd=Decimal(str(pos['supplyAssetsUsd'])),
-                borrow_shares=Decimal(str(pos['borrowShares'])),
-                borrow_assets=Decimal(str(pos['borrowAssets'])),
-                borrow_assets_usd=Decimal(str(pos['borrowAssetsUsd'])),
+                supply_shares=safe_decimal(pos['supplyShares']),
+                supply_assets=safe_decimal(pos['supplyAssets']),
+                supply_assets_usd=safe_decimal(pos['supplyAssetsUsd']),
+                borrow_shares=safe_decimal(pos['borrowShares']),
+                borrow_assets=safe_decimal(pos['borrowAssets']),
+                borrow_assets_usd=safe_decimal(pos['borrowAssetsUsd']),
                 market=market,
                 unique_key=pos['market']['uniqueKey']
             ))
 
+            # log position data
+            logger.debug(f"Convert to MarketPosition complete \n")
+
         # Only include transactions of specific types
-        VALID_TRANSACTION_TYPES = {'MarketSupply', 'MarketWithdraw'}
+        # VALID_TRANSACTION_TYPES = {'MarketSupply', 'MarketWithdraw'}
         transactions = []
         
-        if 'transactions' in data:
-            for tx in data['transactions']:
-                if tx['type'] not in VALID_TRANSACTION_TYPES:
-                    continue
+        # if 'transactions' in data:
+        #     for tx in data['transactions']:
+        #         if tx['type'] not in VALID_TRANSACTION_TYPES:
+        #             continue
 
-                transactions.append(
-                    Transaction(
-                        hash=tx['hash'],
-                        timestamp=tx['timestamp'],
-                        type=tx['type'],
-                        data=TransactionData(   
-                            shares=tx['data']['shares'],
-                            assets=tx['data']['assets'],
-                            market=tx['data']['market']
-                        )
-                    ))
+        #         transactions.append(
+        #             Transaction(
+        #                 hash=tx['hash'],
+        #                 timestamp=tx['timestamp'],
+        #                 type=tx['type'],
+        #                 data=TransactionData(   
+        #                     shares=tx['data']['shares'],
+        #                     assets=tx['data']['assets'],
+        #                     market=tx['data']['market']
+        #                 )
+        #             ))
 
         return cls(
             market_positions=market_positions,
