@@ -1,8 +1,10 @@
 import os
 import logging
+import asyncio
 from typing import List
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
+from aiohttp import ClientTimeout, TCPConnector, ClientSession
 from models.user_data import UserAuthorization
 from queries.monarch_queries import GET_AUTHORIZED_USERS
 
@@ -10,10 +12,24 @@ logger = logging.getLogger(__name__)
 
 class MonarchClient:
     SUBQUERY_ENDPOINT = "https://api.studio.thegraph.com/query/94369/monarch-agent/version/latest"
+    MAX_RETRIES = 3
+    TIMEOUT_SECONDS = 30
     
     def __init__(self):
-        self.transport = AIOHTTPTransport(url=self.SUBQUERY_ENDPOINT)
-        self.client = Client(transport=self.transport, fetch_schema_from_transport=True)
+        self.connector = TCPConnector(limit=10)
+
+    async def _execute_query(self, query, variables=None):
+        """Execute a GraphQL query with proper session management"""
+        timeout = ClientTimeout(total=self.TIMEOUT_SECONDS)
+        async with ClientSession(connector=self.connector, timeout=timeout) as session:
+            transport = AIOHTTPTransport(
+                url=self.SUBQUERY_ENDPOINT,
+            )
+            async with Client(
+                transport=transport,
+                fetch_schema_from_transport=True
+            ) as client:
+                return await client.execute(query, variable_values=variables)
 
     async def get_authorized_users(self, rebalancer_address: str) -> List[UserAuthorization]:
         """Fetch users who have authorized the bot from Monarch Subquery
@@ -24,19 +40,39 @@ class MonarchClient:
         Returns:
             List[UserAuthorization]: List of users and their market caps
         """
-        try:
-            query = gql(GET_AUTHORIZED_USERS)
-            
-            # Execute the query with variables
-            result = await self.client.execute_async(
-                query,
-                variable_values={"rebalancer": rebalancer_address}
-            )
-            
-            # Parse the response into our data structures
-            users_data = result['users']
-            return [UserAuthorization.from_graphql(user_data) for user_data in users_data]
-            
-        except Exception as e:
-            logger.error(f"Error fetching authorized users from Monarch: {str(e)}")
-            return []
+        query = gql(GET_AUTHORIZED_USERS)
+        
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Execute the query with variables
+                result = await self._execute_query(
+                    query,
+                    variables={"rebalancer": rebalancer_address}
+                )
+                
+                # Parse the response into our data structures
+                users_data = result['users']
+                return [UserAuthorization.from_graphql(user_data) for user_data in users_data]
+                
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout fetching authorized users (attempt {attempt + 1}/{self.MAX_RETRIES})"
+                )
+                if attempt == self.MAX_RETRIES - 1:
+                    logger.error("Max retries reached for fetching authorized users")
+                    return []
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                
+            except Exception as e:
+                logger.error(
+                    f"Error fetching authorized users from Monarch (attempt {attempt + 1}): {str(e)}"
+                )
+                if attempt == self.MAX_RETRIES - 1:
+                    return []
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.connector.close()

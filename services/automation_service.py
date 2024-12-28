@@ -28,7 +28,8 @@ class AutomationService:
     async def fetch_authorized_users(self) -> List[UserAuthorization]:
         """Fetch users who have authorized the bot"""
         rebalancer_address = get_address_from_private_key()
-        return await self.monarch_client.get_authorized_users(rebalancer_address)
+        async with self.monarch_client as monarch:
+            return await monarch.get_authorized_users(rebalancer_address)
 
     async def fetch_markets(self) -> Dict[str, Market]:
         """Fetch all markets and cache them by uniqueKey"""
@@ -149,7 +150,8 @@ class AutomationService:
             await self.fetch_markets()
             
             # Get authorized users
-            users = await self.fetch_authorized_users()
+            async with self.monarch_client as monarch:
+                users = await monarch.get_authorized_users(get_address_from_private_key())
             logger.info(f"Found {len(users)} authorized users")
 
             users_reallocation_needed = 0
@@ -164,7 +166,7 @@ class AutomationService:
                     # Execute reallocation if needed
                     if strategy:
                         users_reallocation_needed += 1
-                        await self.execute_reallocation(user.address, strategy)
+                        # await self.execute_reallocation(user.address, strategy)
                         
                         
                 except Exception as e:
@@ -173,7 +175,7 @@ class AutomationService:
                     continue
                     
             # Notify about the result
-            await self.notification_service.notify_run(users_reallocation_needed, users_reallocation_errors)
+            # await self.notification_service.notify_run(users_reallocation_needed, users_reallocation_errors)
             
         except Exception as e:
             logger.error(f"Automation run failed: {str(e)}")
