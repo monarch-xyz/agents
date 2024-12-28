@@ -166,7 +166,7 @@ class AutomationService:
                     # Execute reallocation if needed
                     if strategy:
                         users_reallocation_needed += 1
-                        # await self.execute_reallocation(user.address, strategy)
+                        await self.execute_reallocation(user.address, strategy)
                         
                         
                 except Exception as e:
@@ -175,7 +175,7 @@ class AutomationService:
                     continue
                     
             # Notify about the result
-            # await self.notification_service.notify_run(users_reallocation_needed, users_reallocation_errors)
+            await self.notification_service.notify_run(users_reallocation_needed, users_reallocation_errors)
             
         except Exception as e:
             logger.error(f"Automation run failed: {str(e)}")
