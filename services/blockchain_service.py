@@ -128,8 +128,6 @@ class BlockchainService:
             logger.debug("Final transaction parameters:")
             logger.debug(f"user_address: {user_address}")
             logger.debug(f"token_address: {token_address}")
-            logger.debug(f"from_markets: {[str(m) for m in from_markets_params]}")
-            logger.debug(f"to_markets: {[str(m) for m in to_markets_params]}")
             
             # Build transaction data
             # Get current gas price from Base

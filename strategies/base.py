@@ -25,6 +25,7 @@ class MarketAction:
         market_id: str,
         position: MarketPosition,
         market: Market,
+        move_amount: int,
         use_max_shares: bool = False,
         target_cap: Optional[MarketCap] = None
     ) -> 'MarketAction':
@@ -41,23 +42,11 @@ class MarketAction:
                 current_position=position,
                 target_cap=target_cap
             )
-        else:
-            # Use amount but respect liquidity
-            amount = TokenAmount.from_wei(position.supply_assets, decimals)
-            liquidity = TokenAmount.from_wei(market.state['liquidityAssets'], decimals)
-            
-            # Cap withdrawal at available liquidity
-            if amount > liquidity:
-                logger.warning(
-                    f'Withdrawal amount {amount.to_units()} exceeds liquidity '
-                    f'{liquidity.to_units()} for market {market_id}'
-                )
-                amount = liquidity
-                
+        else:            
             return cls(
                 market_id=market_id,
                 action_type='withdraw',
-                amount=amount,
+                amount=move_amount,
                 shares=TokenAmount.from_wei(0, decimals),
                 current_position=position,
                 target_cap=target_cap

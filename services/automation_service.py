@@ -85,6 +85,9 @@ class AutomationService:
                     f"{market.loan_asset['symbol']} in market {action.market_id[:8]} "
                     f"(current APY: {market.state['supplyApy']:.2%})"
                 )
+
+            else:
+                logger.info(f"Market not found for action: {action.market_id}")
                 
         return positions, strategy_result
 

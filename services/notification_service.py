@@ -26,7 +26,7 @@ class NotificationService:
                 symbol = market.loan_asset['symbol']
                 apy = market.state['supplyApy']
                 message += (
-                    f"• {action.action_type.title()}: {action.amount} {symbol}\n"
+                    f"• {action.action_type.title()}: {action.amount.to_units()} {symbol}\n"
                     f"  Market: {action.market_id[:8]} (APY: {apy:.2%})\n"
                 )
         

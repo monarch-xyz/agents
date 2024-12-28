@@ -149,6 +149,24 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     # Calculate amount to move (limited by market impact)
                     move_amount_wei = min(position_amount_wei, remaining_allocation_wei)
                     
+
+                    # check if liquidity is available
+                    liquidity = int(market.state['liquidityAssets'])
+                    # todo: read from contract to avoid using same liquidity for multiple users
+                    
+                    # Cap withdrawal at available liquidity
+                    if move_amount_wei > liquidity:
+                        logger.warning(
+                            f'Withdrawal amount {move_amount_wei} exceeds liquidity '
+                            f'{liquidity} for market {target_market.unique_key}'
+                        )
+                        move_amount_wei = liquidity
+                    else:
+                        logger.info(
+                            f'Withdrawal amount {move_amount_wei} within liquidity '
+                            f'{liquidity} for market {target_market.unique_key}'
+                        )    
+                    
                     if move_amount_wei <= 0:
                         continue  # Try next market
                     
@@ -157,10 +175,12 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     
                     # Create withdrawal action - use shares if moving entire position
                     use_max_shares = move_amount_wei >= position_amount_wei
+
                     withdrawal = MarketAction.create_withdrawal(
                         market_id=pos.unique_key,
                         position=pos,
                         market=market,
+                        move_amount=move_amount,
                         use_max_shares=use_max_shares,
                         target_cap=target_cap
                     )
