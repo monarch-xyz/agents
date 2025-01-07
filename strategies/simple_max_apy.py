@@ -49,7 +49,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         self.market_allocations.clear()
             
         # Step 1: Group positions by loan token
-        grouped_positions = self.process_positions(positions, market_data)
+        grouped_positions = self.group_positions_by_loan_asset(positions, market_data)
         
         # Fix market cap IDs (remove leading //)
         fixed_caps = []
@@ -75,14 +75,14 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             'decimals': None
         })
         
-        # Process each token group
+        # Process each grouped position
         for group in grouped_positions:
             token = group['loan_token']
             token_addr = token['address']
             symbol = token['symbol']
             decimals = int(token.get('decimals', 18))
             
-            logger.info(f"\nProcessing {symbol} positions (token: {token_addr}):")
+            logger.info(f"\nProcessing {symbol} positions:")
             
             # Get available markets for this token
             available_markets = self.filter_available_markets(token_addr, market_data)

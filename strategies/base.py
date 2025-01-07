@@ -86,7 +86,7 @@ class GroupedPosition(TypedDict):
 class BaseStrategy:
     """Base class for all reallocation strategies"""
     
-    def process_positions(
+    def group_positions_by_loan_asset(
         self,
         positions: List[MarketPosition],
         markets: Dict[str, Market],
@@ -101,7 +101,6 @@ class BaseStrategy:
         Returns:
             List of grouped positions by loan token
         """
-        logger.info(f'Processing {len(positions)} positions across {len(markets)} markets')
         
         # Group positions by loan token address
         grouped = defaultdict(lambda: {
@@ -134,11 +133,12 @@ class BaseStrategy:
             grouped[token_addr]['markets'].append(pos)
             
         result = list(grouped.values())
-        logger.info(f'Grouped into {len(result)} token groups:')
+
+        logger.info("User has {} grouped positions".format(len(result)))
         for group in result:
             token = group['loan_token']
             logger.info(
-                f'- {token.get("symbol", "Unknown")} ({token.get("address", "Unknown")}): '
+                f'- {token.get("symbol", "Unknown")}: '
                 f'{group["total_asset"].to_units()} tokens across {len(group["markets"])} markets'
             )
             

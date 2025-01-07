@@ -66,9 +66,6 @@ class MorphoClient:
                             filtered_positions.append(pos)
 
                     user_data['marketPositions'] = filtered_positions
-                    logger.info(
-                        f"Filtered to {len(filtered_positions)} non-empty positions "
-                    )
                 
                 return UserMarketData.from_graphql(user_data)
                 
