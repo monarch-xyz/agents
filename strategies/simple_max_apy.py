@@ -9,7 +9,7 @@ from .base import BaseStrategy, MarketAction, ReallocationStrategy
 logger = logging.getLogger(__name__)
 
 class SimpleMaxAPYStrategy(BaseStrategy):
-    """Simple strategy that reallocates based on market caps and APY"""
+    """Strategy that moves funds to highest APY market within caps"""
     
     MAX_MARKET_IMPACT_RATIO = 0.05  # 5% of total supply
     
@@ -21,6 +21,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             max_market_impact_ratio: Maximum ratio of market's total supply that can be allocated
                                    (default: 0.05 or 5%)
         """
+        super().__init__()  # Initialize Web3 contract
         self.max_market_impact_ratio = max_market_impact_ratio
         # Track allocations in wei to avoid TokenAmount complexity
         self.market_allocations = defaultdict(int)
@@ -149,10 +150,12 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     # Calculate amount to move (limited by market impact)
                     move_amount_wei = min(position_amount_wei, remaining_allocation_wei)
                     
+                    decimals = int(market.loan_asset.get('decimals', 18))
+                    symbol = market.loan_asset.get('symbol', 'Unknown')
 
-                    # check if liquidity is available
-                    liquidity = int(market.state['liquidityAssets'])
-                    # todo: read from contract to avoid using same liquidity for multiple users
+                    # check if liquidity is available from contract
+                    liquidity = self.get_market_liquidity(market.unique_key)
+                    logger.info(f"Market Liquidity ({market.unique_key[:10]}): {TokenAmount.from_wei(liquidity, decimals).to_units()} {symbol}")
                     
                     # Cap withdrawal at available liquidity
                     if move_amount_wei > liquidity:

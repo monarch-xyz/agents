@@ -2,12 +2,19 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, TypedDict
 from collections import defaultdict
 import logging
+import os
+import json
+from web3 import Web3
+from web3.contract import Contract
 from models.morpho_data import MarketPosition, Market
 from models.user_data import MarketCap
 from utils.token_amount import TokenAmount
+from config.contracts import MORPHO_BLUE_ADDRESS, MORPHO_BLUE_ABI_PATH
 
 
 logger = logging.getLogger(__name__)
+
+# Contract Constants
 
 
 @dataclass
@@ -85,6 +92,25 @@ class GroupedPosition(TypedDict):
 
 class BaseStrategy:
     """Base class for all reallocation strategies"""
+    
+    def __init__(self):
+        """Initialize Web3 contract instance"""
+        provider_url = os.getenv('WEB3_PROVIDER_URL')
+        if not provider_url:
+            raise ValueError("WEB3_PROVIDER_URL environment variable not set")
+            
+        self.w3 = Web3(Web3.HTTPProvider(provider_url))
+        
+        # Load Morpho Blue contract
+        with open(MORPHO_BLUE_ABI_PATH) as f:
+            morpho_blue_abi = json.load(f)
+            
+        self.morpho_blue_contract = self.w3.eth.contract(
+            address=Web3.to_checksum_address(MORPHO_BLUE_ADDRESS),
+            abi=morpho_blue_abi
+        )
+        
+        logger.info("Initialized Morpho Blue contract")
     
     def group_positions_by_loan_asset(
         self,
@@ -178,6 +204,34 @@ class BaseStrategy:
             key=lambda m: float(m.state['supplyApy']),
             reverse=True
         )
+    
+    def get_market_liquidity(self, market_id: str) -> int:
+        """Get available liquidity for a market directly from the contract
+        
+        Args:
+            market_id: Market unique key
+            
+        Returns:
+            Available liquidity in wei
+        """
+        # Get market state from contract
+        market_state = self.morpho_blue_contract.functions.market(market_id).call()
+        
+        # Market state returns:
+        # - totalSupplyAssets (uint128)
+        # - totalSupplyShares (uint128)
+        # - totalBorrowAssets (uint128)
+        # - totalBorrowShares (uint128)
+        # - lastUpdate (uint128)
+        # - fee (uint128)
+        total_supply = market_state[0]  # totalSupplyAssets
+        total_borrow = market_state[2]  # totalBorrowAssets
+        
+        # Available liquidity is supply - borrow
+        liquidity = total_supply - total_borrow
+        
+        logger.debug(f"Market liquidity from contract ({market_id}): {liquidity}")
+        return liquidity
     
     def calculate_reallocation(
         self,
