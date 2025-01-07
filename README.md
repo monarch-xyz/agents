@@ -1,5 +1,7 @@
 # Morpho Automation Service
 
+[![Tests](https://github.com/YOUR_USERNAME/agent-backend/actions/workflows/test.yml/badge.svg)](https://github.com/YOUR_USERNAME/agent-backend/actions/workflows/test.yml)
+
 This service automates fund reallocation for users who have authorized the bot. It runs periodically to:
 1. Fetch blockchain data
 2. Query Morpho API and Monarch subquery
