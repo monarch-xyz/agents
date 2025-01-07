@@ -7,12 +7,9 @@ from web3.gas_strategies.rpc import rpc_gas_price_strategy
 from eth_account import Account
 from typing import Dict, Optional, Tuple
 from web3.types import TxReceipt
+from config.contracts import AGENT_CONTRACT_ADDRESS, AGENT_ABI_PATH
 
 logger = logging.getLogger(__name__)
-
-# Contract Constants
-AGENT_CONTRACT_ADDRESS = "0x6a9BA5c91fDd608b3F85c3E031a4f531f331f545"
-AGENT_ABI_PATH = os.path.join(os.path.dirname(__file__), "../utils/abi/agent-v1.json")
 
 class BlockchainClient:
     def __init__(self):
