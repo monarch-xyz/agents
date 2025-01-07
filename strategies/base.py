@@ -14,8 +14,6 @@ from config.contracts import MORPHO_BLUE_ADDRESS, MORPHO_BLUE_ABI_PATH
 
 logger = logging.getLogger(__name__)
 
-# Contract Constants
-
 
 @dataclass
 class MarketAction:
