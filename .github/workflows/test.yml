@@ -8,16 +8,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ["3.10"]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
@@ -30,18 +30,3 @@ jobs:
     - name: Run tests with coverage
       run: |
         python -m pytest -v --cov=./ --cov-report=xml --junitxml=test-results.xml
-    
-    - name: Upload test results
-      uses: actions/upload-artifact@v3
-      if: always()  # Upload even if tests fail
-      with:
-        name: test-results
-        path: |
-          test-results.xml
-          coverage.xml
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: true
