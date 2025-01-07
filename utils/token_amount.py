@@ -47,14 +47,21 @@ class TokenAmount:
             raise ValueError(f"Decimals cannot exceed {self.MAX_DECIMALS}")
     
     @classmethod
-    def from_wei(cls, wei_amount: Union[int, str], decimals: int = 18) -> 'TokenAmount':
+    def from_wei(cls, wei_amount: Union[int, str, Decimal], decimals: int = 18) -> 'TokenAmount':
         """Create from wei amount with validation"""
-        # Convert string to int if needed
-        if isinstance(wei_amount, str):
-            try:
+        # Convert input to integer
+        try:
+            if isinstance(wei_amount, Decimal):
+                wei_str = f"{wei_amount:.0f}"
+                wei_amount = int(wei_str)
+            elif isinstance(wei_amount, str):
                 wei_amount = int(wei_amount)
-            except ValueError:
-                raise ValueError(f"Invalid wei amount string: {wei_amount}")
+            elif isinstance(wei_amount, float):
+                raise TypeError("Float values are not supported to avoid precision loss")
+            elif not isinstance(wei_amount, int):
+                raise TypeError(f"Cannot convert {type(wei_amount)} to integer")
+        except ValueError:
+            raise ValueError(f"Invalid wei amount: {wei_amount}")
         
         return cls(raw=wei_amount, decimals=decimals)
     

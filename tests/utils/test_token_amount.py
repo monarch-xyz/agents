@@ -200,3 +200,19 @@ def test_operation_type_safety():
     # Test invalid comparison
     with pytest.raises(TypeError):
         amount < 1000
+
+def test_from_wei_decimal():
+    """Test creating TokenAmount from Decimal wei amounts"""
+    # Test with Decimal input
+    amount = TokenAmount.from_wei(Decimal('1000000'), decimals=6)
+    assert amount.raw == 1_000_000
+    assert amount.decimals == 6
+    assert amount.to_units() == "1.000000"
+    
+    # Test with float (should fail)
+    with pytest.raises(TypeError, match="Float values are not supported"):
+        TokenAmount.from_wei(1000000.0, decimals=6)
+    
+    # Test with invalid type
+    with pytest.raises(TypeError, match="Cannot convert"):
+        TokenAmount.from_wei([1000000], decimals=6)
