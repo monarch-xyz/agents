@@ -101,7 +101,6 @@ class BaseStrategy:
         Returns:
             List of grouped positions by loan token
         """
-        logger.info(f'Processing {len(positions)} positions across {len(markets)} markets')
         
         # Group positions by loan token address
         grouped = defaultdict(lambda: {
@@ -134,6 +133,8 @@ class BaseStrategy:
             grouped[token_addr]['markets'].append(pos)
             
         result = list(grouped.values())
+
+        logger.info("User has {} grouped positions".format(len(result)))
         for group in result:
             token = group['loan_token']
             logger.info(

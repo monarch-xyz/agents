@@ -26,6 +26,12 @@ class AutomationService:
         self.notification_service = NotificationService()
         self.markets_by_id: Dict[str, Market] = {}  # Cache markets by uniqueKey
         
+        # Get whitelist from environment variable
+        whitelist_str = os.getenv('WHITELISTED_ADDRESSES')
+        self.whitelisted_addresses = set(addr.lower() for addr in whitelist_str.split(',')) if whitelist_str else set()
+        if self.whitelisted_addresses:
+            logger.info(f"Whitelist enabled with {len(self.whitelisted_addresses)} addresses")
+
     async def fetch_authorized_users(self) -> List[UserAuthorization]:
         """Fetch users who have authorized the bot"""
         rebalancer_address = get_address_from_private_key()
@@ -153,7 +159,13 @@ class AutomationService:
             # Get authorized users
             async with self.monarch_client as monarch:
                 users = await monarch.get_authorized_users(get_address_from_private_key())
-            logger.info(f"Found {len(users)} authorized users")
+            
+            # Filter users by whitelist if enabled
+            if self.whitelisted_addresses:
+                users = [user for user in users if user.address.lower() in self.whitelisted_addresses]
+                logger.info(f"Filtered to {len(users)} whitelisted users")
+            else:
+                logger.info(f"Found {len(users)} authorized users")
 
             users_reallocation_needed = 0
             users_reallocation_errors = 0

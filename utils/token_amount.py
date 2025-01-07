@@ -46,9 +46,13 @@ class TokenAmount:
         assert self.decimals == other.decimals, "Cannot compare tokens with different decimals"
         return self.raw >= other.raw
     
-    def to_units(self, precision: int = 18) -> str:
-        """Convert to human readable units with specified decimal precision"""
+    def to_units(self, precision: int = None) -> str:
+        """
+        Convert to human readable units with specified decimal precision.
+        If precision is not specified, uses the token's own decimals.
+        """
         units = self.raw / (10 ** self.decimals)
+        precision = precision if precision is not None else self.decimals
         return f"{units:.{precision}f}"
     
     def to_wei(self) -> int:
