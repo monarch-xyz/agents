@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
 from web3.types import TxReceipt
@@ -49,7 +50,7 @@ class AutomationService:
             markets_by_asset[asset_symbol].append(market)
             
         # Log markets grouped by asset
-        logger.info(f"Fetched {len(markets)} markets across {len(markets_by_asset)} assets:")
+        logger.info(f"Fetched {len(markets)} markets data")
         
         return self.markets_by_id
 
@@ -160,6 +161,11 @@ class AutomationService:
             # Process each user
             for user in users:
                 try:
+                    logger.info(f"Processing user {user.address}")
+
+                    # Refetch market Data
+                    await self.fetch_markets()
+
                     # Analyze positions and get reallocation strategy
                     positions, strategy = await self.analyze_user_positions(user)
                     
@@ -167,8 +173,12 @@ class AutomationService:
                     if strategy:
                         users_reallocation_needed += 1
                         await self.execute_reallocation(user.address, strategy)
-                        
-                        
+
+                    # Wait for 5 seconds before processing next user
+                    await asyncio.sleep(5)
+
+                    logger.info(f"====================== Finished processing user {user.address} ======================")
+                    
                 except Exception as e:
                     logger.error(f"Error processing user {user.address}: {str(e)}")
                     users_reallocation_errors += 1
