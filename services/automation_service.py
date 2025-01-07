@@ -9,6 +9,7 @@ from clients.morpho_client import MorphoClient
 from clients.blockchain_client import BlockchainClient
 from services.blockchain_service import BlockchainService
 from services.notification_service import NotificationService
+from services.gas_service import GasService
 from models.user_data import UserAuthorization
 from models.morpho_data import UserMarketData, Market
 from strategies.simple_max_apy import SimpleMaxAPYStrategy, ReallocationStrategy
@@ -24,6 +25,7 @@ class AutomationService:
         self.blockchain_service = BlockchainService(self.blockchain_client)
         self.strategy = SimpleMaxAPYStrategy()
         self.notification_service = NotificationService()
+        self.gas_service = GasService()
         self.markets_by_id: Dict[str, Market] = {}  # Cache markets by uniqueKey
         
         # Get whitelist from environment variable
@@ -140,7 +142,7 @@ class AutomationService:
             
             # Log success
             logger.info(
-                f"Reallocation executed successfully for {user_address}. "
+                f"Reallocation executed successfully for {user.address}. "
                 f"Transaction: {tx_hash}"
             )
             
@@ -153,12 +155,19 @@ class AutomationService:
     async def run(self):
         """Main automation loop"""
         try:
+            # Wait for acceptable gas price before starting
+            try:
+                gas_price = await self.gas_service.wait_for_acceptable_gas()
+                logger.info(f"Gas price acceptable at {gas_price:.1f} gwei. Starting automation...")
+            except TimeoutError as e:
+                logger.error(str(e))
+                return
+                
             # Fetch latest market data
             await self.fetch_markets()
             
-            # Get authorized users
-            async with self.monarch_client as monarch:
-                users = await monarch.get_authorized_users(get_address_from_private_key())
+            # Fetch authorized users
+            users = await self.fetch_authorized_users()
             
             # Filter users by whitelist if enabled
             if self.whitelisted_addresses:
