@@ -142,7 +142,7 @@ class AutomationService:
             
             # Log success
             logger.info(
-                f"Reallocation executed successfully for {user.address}. "
+                f"Reallocation executed successfully for {user_address}. "
                 f"Transaction: {tx_hash}"
             )
             
