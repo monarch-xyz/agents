@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class GasService:
     """Service for monitoring gas fees on L1"""
     
-    def __init__(self, max_gas_price: int = 15, max_retries: int = 120, retry_delay: int = 60):
+    def __init__(self, max_gas_price: int = 15, max_retries: int = 180, retry_delay: int = 60):
         """Initialize gas service
         
         Args:

@@ -25,7 +25,13 @@ class AutomationService:
         self.blockchain_service = BlockchainService(self.blockchain_client)
         self.strategy = SimpleMaxAPYStrategy()
         self.notification_service = NotificationService()
-        self.gas_service = GasService()
+        
+        # Initialize GasService with environment variable
+        max_gas_price = int(os.getenv('GAS_POLICY_MIN_GAS', '15'))  # Default to 15 if not set
+        max_retries = int(os.getenv('GAS_POLICY_MAX_RETRIES', '180'))  # Default to 180 if not set
+
+        self.gas_service = GasService(max_gas_price=max_gas_price, max_retries=max_retries)
+        
         self.markets_by_id: Dict[str, Market] = {}  # Cache markets by uniqueKey
         
         # Get whitelist from environment variable
