@@ -150,13 +150,30 @@ class Market:
 
 
 @dataclass
-class MarketPosition:
+class PositionState:
     supply_shares: Decimal
     supply_assets: Decimal
     supply_assets_usd: Decimal
     borrow_shares: Decimal
     borrow_assets: Decimal
     borrow_assets_usd: Decimal
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'PositionState':
+        """Create PositionState from dict with safe decimal conversion"""
+        return cls(
+            supply_shares=safe_decimal(data['supplyShares']),
+            supply_assets=safe_decimal(data['supplyAssets']),
+            supply_assets_usd=safe_decimal(data['supplyAssetsUsd']),
+            borrow_shares=safe_decimal(data['borrowShares']),
+            borrow_assets=safe_decimal(data['borrowAssets']),
+            borrow_assets_usd=safe_decimal(data['borrowAssetsUsd'])
+        )
+
+
+@dataclass
+class MarketPosition:
+    state: PositionState
     market: Market
     unique_key: str
 
@@ -164,6 +181,36 @@ class MarketPosition:
     def id(self) -> str:
         """Get the unique market identifier"""
         return self.unique_key
+    
+    @property
+    def supply_shares(self) -> Decimal:
+        """Get supply shares from state for backward compatibility"""
+        return self.state.supply_shares
+        
+    @property
+    def supply_assets(self) -> Decimal:
+        """Get supply assets from state for backward compatibility"""
+        return self.state.supply_assets
+        
+    @property
+    def supply_assets_usd(self) -> Decimal:
+        """Get supply assets USD from state for backward compatibility"""
+        return self.state.supply_assets_usd
+        
+    @property
+    def borrow_shares(self) -> Decimal:
+        """Get borrow shares from state for backward compatibility"""
+        return self.state.borrow_shares
+        
+    @property
+    def borrow_assets(self) -> Decimal:
+        """Get borrow assets from state for backward compatibility"""
+        return self.state.borrow_assets
+        
+    @property
+    def borrow_assets_usd(self) -> Decimal:
+        """Get borrow assets USD from state for backward compatibility"""
+        return self.state.borrow_assets_usd
 
 
 @dataclass
@@ -193,9 +240,8 @@ class UserMarketData:
         transactions = []
 
         for pos in data['marketPositions']:
-
             # log 
-            logger.debug(f"Sart iteration, Market ID \n: {pos['market']['id']}")
+            logger.debug(f"Start iteration, Market ID \n: {pos['market']['id']}")
 
             try: 
                 market = Market(
@@ -246,22 +292,17 @@ class UserMarketData:
                 )
             except Exception as e:
                 logger.error(f"Error converting market data: {str(e)}")
-                
-                # detail log market
                 logger.debug(f"Market data: {pos['market']}")
-                
                 continue
 
             # log market data
             logger.debug(f"Convert to Market complete \n")
 
+            # Create position state from the state field
+            position_state = PositionState.from_dict(pos['state'])
+
             market_positions.append(MarketPosition(
-                supply_shares=safe_decimal(pos['supplyShares']),
-                supply_assets=safe_decimal(pos['supplyAssets']),
-                supply_assets_usd=safe_decimal(pos['supplyAssetsUsd']),
-                borrow_shares=safe_decimal(pos['borrowShares']),
-                borrow_assets=safe_decimal(pos['borrowAssets']),
-                borrow_assets_usd=safe_decimal(pos['borrowAssetsUsd']),
+                state=position_state,
                 market=market,
                 unique_key=pos['market']['uniqueKey']
             ))

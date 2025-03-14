@@ -2,12 +2,14 @@ GET_USER_MARKET_POSITIONS = """
 query getUserMarketPositions($address: String!, $chainId: Int) {
     userByAddress(address: $address, chainId: $chainId) {
         marketPositions {
-            supplyShares
-            supplyAssets
-            supplyAssetsUsd
-            borrowShares
-            borrowAssets
-            borrowAssetsUsd
+            state {
+                supplyShares
+                supplyAssets
+                supplyAssetsUsd
+                borrowShares
+                borrowAssets
+                borrowAssetsUsd
+            }
             market {
                 id
                 lltv

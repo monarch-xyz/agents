@@ -36,7 +36,7 @@ class MorphoClient:
         
         Args:
             address: User's ethereum address
-            chain_id: Chain ID (default: 1 for Ethereum mainnet)
+            chain_id: Chain ID (default: 8453 for Base)
             
         Returns:
             UserMarketData: User's positions and transactions
@@ -57,7 +57,8 @@ class MorphoClient:
                 if 'marketPositions' in user_data:
                     filtered_positions = []
                     for pos in user_data['marketPositions']:
-                        supply_assets = int(pos.get('supplyAssets', 0))
+                        # Check state object for supply assets
+                        supply_assets = int(pos['state'].get('supplyAssets', 0))
                         logger.debug(
                             f"Position {pos['market']['uniqueKey'][:10]} has "
                             f"supplyAssets: {supply_assets}"
