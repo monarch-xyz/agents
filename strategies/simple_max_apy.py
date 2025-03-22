@@ -113,9 +113,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     
                 current_apy = float(market.state['supplyApy'])
                 
-                print("pos.supply_assets before")
                 position_amount_wei = int(pos.supply_assets)
-                print("pos.supply_assets after")
                 
                 logger.info(
                     f"Processing position in market ({pos.unique_key[:10]}) "
