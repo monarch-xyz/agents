@@ -79,7 +79,11 @@ class AutomationService:
             Tuple of (positions, reallocation_strategy)
             If no reallocation is needed, strategy will be None
         """
+        logger.info(f"Fetching positions for user {user.address}")
         positions = await self.morpho_client.get_user_positions(user.address, 8453)
+        
+        # Log positions count
+        logger.info(f"Found {len(positions.market_positions)} market positions for user {user.address}")
         
         # Calculate reallocation strategy
         strategy_result = self.strategy.calculate_reallocation(

@@ -13,6 +13,7 @@ from utils.token_amount import TokenAmount
 from clients.blockchain_client import BlockchainClient
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class BlockchainService:
     """Service for composing blockchain transactions"""
