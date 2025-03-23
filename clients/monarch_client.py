@@ -70,6 +70,9 @@ class MonarchClient:
                 if attempt == self.MAX_RETRIES - 1:
                     return []
                 await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+        
+        # Default return if we exit the for loop without returning
+        return []
 
     async def __aenter__(self):
         return self

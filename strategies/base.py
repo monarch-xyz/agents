@@ -1,12 +1,11 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional, TypedDict
+from typing import List, Dict, Optional, TypedDict, Any
 from collections import defaultdict
 import logging
 import os
 import json
 from web3 import Web3
-from web3.contract import Contract
-from models.morpho_data import MarketPosition, Market
+from models.morpho_data import MarketPosition, Market, Asset
 from models.user_data import MarketCap
 from utils.token_amount import TokenAmount
 from config.contracts import MORPHO_BLUE_ADDRESS, MORPHO_BLUE_ABI_PATH
@@ -35,7 +34,7 @@ class MarketAction:
         target_cap: Optional[MarketCap] = None
     ) -> 'MarketAction':
         """Create a withdrawal action with proper amount/share handling"""
-        decimals = int(market.loan_asset.get('decimals', 18))
+        decimals = market.loan_asset.decimals
         
         if use_max_shares:
             # Use shares for max withdrawal
@@ -47,11 +46,13 @@ class MarketAction:
                 current_position=position,
                 target_cap=target_cap
             )
-        else:            
+        else:
+            # Create TokenAmount for the move_amount
+            amount_token = TokenAmount.from_wei(move_amount, decimals)
             return cls(
                 market_id=market_id,
                 action_type='withdraw',
-                amount=move_amount,
+                amount=amount_token,
                 shares=TokenAmount.from_wei(0, decimals),
                 current_position=position,
                 target_cap=target_cap
@@ -83,9 +84,10 @@ class ReallocationStrategy:
 
 
 class GroupedPosition(TypedDict):
-    loan_token: Dict  # Full token data including address and symbol
+    """A typed dictionary for grouped positions by loan token"""
+    loan_token: Asset  # The loan token asset
     total_asset: TokenAmount  # Total amount in native token units
-    markets: List[MarketPosition]
+    markets: List[MarketPosition]  # List of positions in this token
 
 
 class BaseStrategy:
@@ -126,12 +128,8 @@ class BaseStrategy:
             List of grouped positions by loan token
         """
         
-        # Group positions by loan token address
-        grouped = defaultdict(lambda: {
-            'loan_token': {},
-            'total_asset': TokenAmount.from_wei(0),
-            'markets': []
-        })
+        # Use a dict for grouping since we can't use defaultdict with TypedDict
+        grouped_by_token: Dict[str, GroupedPosition] = {}
         
         for pos in positions:
             market = markets.get(pos.unique_key)
@@ -140,29 +138,37 @@ class BaseStrategy:
                 continue
                 
             token = market.loan_asset
-            if not token or 'address' not in token:
+            if not token:
                 logger.warning(f'Invalid loan asset data for market {pos.unique_key}: {token}')
                 continue
                 
-            token_addr = token['address']
-            decimals = int(token.get('decimals', 18))
+            token_addr = token.address
+            decimals = token.decimals
 
             supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
                 
-            if not grouped[token_addr]['loan_token']:
-                grouped[token_addr]['loan_token'] = token
-                grouped[token_addr]['total_asset'] = TokenAmount.from_wei(0, decimals)
+            if token_addr not in grouped_by_token:
+                # Create a new GroupedPosition
+                grouped_by_token[token_addr] = {
+                    'loan_token': token,
+                    'total_asset': TokenAmount.from_wei(0, decimals),
+                    'markets': []
+                }
                 
-            grouped[token_addr]['total_asset'] += supply_amount
-            grouped[token_addr]['markets'].append(pos)
+            # Add to existing group
+            grouped_position = grouped_by_token[token_addr]
+            # Update the total asset
+            grouped_position['total_asset'] += supply_amount
+            # Add to markets list
+            grouped_position['markets'].append(pos)
             
-        result = list(grouped.values())
+        result = list(grouped_by_token.values())
 
-        logger.info("User has {} grouped positions".format(len(result)))
+        logger.info(f"User has {len(result)} grouped positions")
         for group in result:
             token = group['loan_token']
             logger.info(
-                f'- {token.get("symbol", "Unknown")}: '
+                f'- {token.symbol}: '
                 f'{group["total_asset"].to_units()} tokens across {len(group["markets"])} markets'
             )
             
@@ -188,10 +194,10 @@ class BaseStrategy:
         min_tvl_asset = int(10_000)
         
         for market in markets.values():
-            supply_assets_usd = int(market.state['supplyAssetsUsd'])
+            supply_assets_usd = int(market.state.supply_assets_usd)
 
             if (
-                market.loan_asset['address'] == loan_token_addr and
+                market.loan_asset.address == loan_token_addr and
                 supply_assets_usd >= min_tvl_asset
             ):
                 available.append(market)
@@ -199,7 +205,7 @@ class BaseStrategy:
         # Sort by APY (highest first)
         return sorted(
             available,
-            key=lambda m: float(m.state['supplyApy']),
+            key=lambda m: float(m.state.supply_apy),
             reverse=True
         )
     

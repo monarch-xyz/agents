@@ -4,13 +4,6 @@ from services.automation_service import AutomationService
 import asyncio
 from utils.logging import setup_logging
 
-# Configure logging
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-# )
-# logger = logging.getLogger(__name__)
-
 def run_automation():
     """Main function to run the automation process"""
     try:
@@ -26,6 +19,7 @@ def main():
     
     # Run automation once
     logging.info("Starting automation run...")
+
     run_automation()
 
 if __name__ == "__main__":

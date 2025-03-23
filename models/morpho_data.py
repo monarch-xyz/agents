@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ConversionSyntax
 from datetime import datetime
 import logging
 
@@ -72,12 +72,30 @@ class MarketState:
 def safe_decimal(value, default="0") -> Decimal:
     """Safely convert a value to Decimal, handling None and other edge cases"""
     if value is None:
+        logger.debug(f"Converting None to Decimal({default})")
         return Decimal(default)
+        
+    # Handle various data types
     try:
-        # Handle scientific notation and large numbers
-        return Decimal(str(value))
-    except (Decimal.InvalidOperation, Decimal.ConversionSyntax):
-        logger.warning(f"Could not convert {value} to Decimal, using default {default}")
+        if isinstance(value, str):
+            # Handle empty strings
+            if not value.strip():
+                logger.debug(f"Converting empty string to Decimal({default})")
+                return Decimal(default)
+                
+            # Handle scientific notation and large numbers
+            return Decimal(value)
+            
+        elif isinstance(value, (int, float)):
+            # Convert through string to avoid float precision issues
+            return Decimal(str(value))
+            
+        else:
+            # Try direct conversion for other types
+            return Decimal(str(value))
+            
+    except (InvalidOperation, ConversionSyntax, ValueError, TypeError) as e:
+        logger.warning(f"Could not convert {value} (type: {type(value)}) to Decimal: {str(e)}")
         return Decimal(default)
 
 
@@ -147,6 +165,110 @@ class Market:
     bad_debt: BadDebt
     realized_bad_debt: BadDebt
     oracle: dict  # Can be expanded if needed
+    
+    @classmethod
+    def from_api(cls, data: dict) -> 'Market':
+        """Create a Market object from API response data"""
+        try:
+            # Debug logging
+            required_fields = ['id', 'lltv', 'uniqueKey', 'irmAddress', 'oracleAddress', 
+                               'collateralPrice', 'morphoBlue', 'oracleInfo', 'loanAsset', 
+                               'collateralAsset', 'state', 'dailyApys', 'warnings', 
+                               'badDebt', 'realizedBadDebt', 'oracle']
+            
+            missing_fields = []
+            for field in required_fields:
+                if field not in data:
+                    missing_fields.append(field)
+                    logging.error(f"Missing required field '{field}' in market data")
+                    
+            if missing_fields:
+                logging.error(f"Missing fields in market data: {', '.join(missing_fields)}")
+                logging.debug(f"Available fields: {', '.join(data.keys())}")
+                    
+            # Ensure badDebt and realizedBadDebt have defaults if None
+            badDebt = data.get('badDebt') or {'underlying': '0', 'usd': '0'}
+            realizedBadDebt = data.get('realizedBadDebt') or {'underlying': '0', 'usd': '0'}
+            
+            # Log any None values we're fixing with defaults
+            if data.get('badDebt') is None:
+                logging.debug(f"Using default badDebt for market {data.get('uniqueKey', 'unknown')}")
+            if data.get('realizedBadDebt') is None:
+                logging.debug(f"Using default realizedBadDebt for market {data.get('uniqueKey', 'unknown')}")
+                
+            # Check for potential None values in nested fields
+            for field, nested_field in [
+                ('state', 'supplyAssetsUsd'),
+                ('state', 'collateralAssetsUsd'),
+                ('dailyApys', 'netSupplyApy'),
+                ('dailyApys', 'netBorrowApy')
+            ]:
+                if field in data and data[field] is not None and nested_field in data[field] and data[field][nested_field] is None:
+                    logging.warning(f"Field {field}.{nested_field} is None for market {data.get('uniqueKey', 'unknown')[:8]}, using default '0'")
+                    data[field][nested_field] = "0"
+                    
+            # Create the Market object with careful error handling
+            return cls(
+                id=data['id'],
+                lltv=data['lltv'],
+                unique_key=data['uniqueKey'],
+                irm_address=data['irmAddress'],
+                oracle_address=data['oracleAddress'],
+                collateral_price=data['collateralPrice'],
+                morpho_blue=MorphoBlue(
+                    id=data['morphoBlue']['id'],
+                    address=data['morphoBlue']['address'],
+                    chain=Chain(id=data['morphoBlue']['chain']['id'])
+                ),
+                oracle_info=data['oracleInfo'],
+                loan_asset=Asset(
+                    id=data['loanAsset']['id'],
+                    address=data['loanAsset']['address'],
+                    symbol=data['loanAsset']['symbol'],
+                    name=data['loanAsset']['name'],
+                    decimals=data['loanAsset']['decimals']
+                ),
+                collateral_asset=Asset(
+                    id=data['collateralAsset']['id'],
+                    address=data['collateralAsset']['address'],
+                    symbol=data['collateralAsset']['symbol'],
+                    name=data['collateralAsset']['name'],
+                    decimals=data['collateralAsset']['decimals']
+                ),
+                state=MarketState.from_dict(data['state']),
+                daily_apys=DailyApys(
+                    net_supply_apy=safe_decimal(data['dailyApys']['netSupplyApy']),
+                    net_borrow_apy=safe_decimal(data['dailyApys']['netBorrowApy'])
+                ),
+                warnings=[Warning(type=w['type'], level=w['level']) for w in data['warnings']] if data['warnings'] else [],
+                bad_debt=BadDebt(
+                    underlying=int(badDebt['underlying']),
+                    usd=int(badDebt['usd'])
+                ),
+                realized_bad_debt=BadDebt(
+                    underlying=int(realizedBadDebt['underlying']),
+                    usd=int(realizedBadDebt['usd'])
+                ),
+                oracle=data['oracle']  # Keep as dict as it has different possible shapes
+            )
+        except KeyError as e:
+            logging.error(f"KeyError creating Market from API data: {str(e)}")
+            logging.debug(f"Missing key: {e}")
+            logging.debug(f"Available keys: {data.keys()}")
+            raise
+        except TypeError as e:
+            logging.error(f"TypeError creating Market from API data: {str(e)}")
+            logging.debug(f"Error details: {str(e)}")
+            if "'NoneType' object is not subscriptable" in str(e):
+                logging.error("This is likely due to a None value in a nested field")
+                for field in ['morphoBlue', 'loanAsset', 'collateralAsset', 'state', 'dailyApys', 'badDebt', 'realizedBadDebt']:
+                    if field in data:
+                        logging.debug(f"Field {field} value: {data[field]}")
+            raise
+        except Exception as e:
+            logging.error(f"Error creating Market from API data: {str(e)}")
+            logging.debug(f"Data that caused error: {data}")
+            raise
 
 
 @dataclass
@@ -314,22 +436,6 @@ class UserMarketData:
         # VALID_TRANSACTION_TYPES = {'MarketSupply', 'MarketWithdraw'}
         transactions = []
         
-        # if 'transactions' in data:
-        #     for tx in data['transactions']:
-        #         if tx['type'] not in VALID_TRANSACTION_TYPES:
-        #             continue
-
-        #         transactions.append(
-        #             Transaction(
-        #                 hash=tx['hash'],
-        #                 timestamp=tx['timestamp'],
-        #                 type=tx['type'],
-        #                 data=TransactionData(   
-        #                     shares=tx['data']['shares'],
-        #                     assets=tx['data']['assets'],
-        #                     market=tx['data']['market']
-        #                 )
-        #             ))
 
         return cls(
             market_positions=market_positions,

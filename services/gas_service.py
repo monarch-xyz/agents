@@ -5,7 +5,6 @@ import time
 import logging
 import asyncio
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,6 @@ class GasService:
             raise ValueError("L1_WEB3_PROVIDER_URL environment variable not set")
             
         self.w3 = Web3(Web3.HTTPProvider(provider_url))
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         
     async def wait_for_acceptable_gas(self) -> float:
         """Wait until gas price is below maximum threshold
@@ -47,9 +45,8 @@ class GasService:
             gas_price_gwei = self.w3.from_wei(gas_price_wei, 'gwei')
             
             logger.info(f"Current L1 gas price: {gas_price_gwei:.1f} gwei {gas_price_wei}")
-
             if gas_price_gwei <= self.max_gas_price:
-                return gas_price_gwei
+                return float(gas_price_gwei)
                 
             if attempt < self.max_retries - 1:
                 logger.warning(

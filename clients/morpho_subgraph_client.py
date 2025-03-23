@@ -98,6 +98,11 @@ class MorphoSubgraphClient:
                 if attempt == self.MAX_RETRIES - 1:
                     raise
                 await asyncio.sleep(1 * (attempt + 1))
+        
+        # Default return if we exit the for loop without returning or raising
+        logger.warning(f"Returning empty UserPositionsSubgraph after all attempts for {address}")
+        # Create an empty UserPositionsSubgraph with no positions
+        return UserPositionsSubgraph(positions=[])
     
     async def __aenter__(self):
         return self

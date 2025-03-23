@@ -60,7 +60,7 @@ class AutomationService:
         # Group markets by loan asset for logging
         markets_by_asset = defaultdict(list)
         for market in markets:
-            asset_symbol = market.loan_asset['symbol']
+            asset_symbol = market.loan_asset.symbol
             markets_by_asset[asset_symbol].append(market)
             
         # Log markets grouped by asset
@@ -102,8 +102,8 @@ class AutomationService:
             if market:
                 logger.info(
                     f"Action: {action.action_type} {action.amount} "
-                    f"{market.loan_asset['symbol']} in market {action.market_id[:8]} "
-                    f"(current APY: {market.state['supplyApy']:.2%})"
+                    f"{market.loan_asset.symbol} in market {action.market_id[:8]} "
+                    f"(current APY: {market.state.supply_apy:.2%})"
                 )
 
             else:
@@ -145,7 +145,12 @@ class AutomationService:
             # Send notification
             await self.notification_service.notify_reallocation(
                 user_address=user_address,
-                actions=strategy_result.actions,
+                actions=[{
+                    'market_id': action.market_id,
+                    'action_type': action.action_type,
+                    'amount_value': action.amount.to_units(),
+                    'symbol': self.markets_by_id[action.market_id].loan_asset.symbol
+                } for action in strategy_result.actions],
                 markets=self.markets_by_id,
                 tx_hash=tx_hash
             )

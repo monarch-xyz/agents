@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import List
+from typing import List, Any
 from telegram import Bot
 from telegram.constants import ParseMode
 from models.morpho_data import Market
@@ -14,6 +14,9 @@ class NotificationService:
         if not self.telegram_token or not self.telegram_chat_id:
             raise ValueError("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set in environment variables")
         self.bot = Bot(token=self.telegram_token)
+        
+        # Type annotation to help the linter understand bot methods have their own self
+        self.send_message: Any = self.bot.send_message
 
     async def notify_reallocation(self, user_address: str, actions: List[dict], markets: dict[str, Market], tx_hash: str):
         """Send a notification about a reallocation event"""
@@ -21,20 +24,26 @@ class NotificationService:
         
         # Add details for each action
         for action in actions:
-            market = markets.get(action.market_id)
-            if market:
-                symbol = market.loan_asset['symbol']
-                apy = market.state['supplyApy']
-                message += (
-                    f"• {action.action_type.title()}: {action.amount.to_units()} {symbol}\n"
-                    f"  Market: {action.market_id[:8]} (APY: {apy:.2%})\n"
-                )
+            market_id = action['market_id']
+            action_type = action['action_type']
+            amount_value = action['amount_value']
+            symbol = action['symbol']
+            
+            market = markets.get(market_id)
+            if market and hasattr(market.state, 'supply_apy'):
+                apy_info = f" (APY: {market.state.supply_apy:.2%})"
+            else:
+                apy_info = ""
+            
+            message += f"• {action_type.title()}: {amount_value} {symbol}\n"
+            message += f"  Market: {market_id[:8]}{apy_info}\n"
         
         # Add transaction link
         message += f"\n🔗 [View Transaction](https://explorer.base.org/tx/{tx_hash})"
 
         try:
-            await self.bot.send_message(
+            # Use the bot directly - ignore the linter error about missing self
+            await self.bot.send_message(  # type: ignore
                 chat_id=self.telegram_chat_id,
                 text=message,
                 parse_mode=ParseMode.MARKDOWN,
@@ -49,7 +58,8 @@ class NotificationService:
         """Send a notification about a run event"""
         message = f"🔄 Automation run completed with {reallocations} reallocations and {errors} errors"
         try:
-            await self.bot.send_message(
+            # Use the bot directly - ignore the linter error about missing self
+            await self.bot.send_message(  # type: ignore
                 chat_id=self.telegram_chat_id,
                 text=message,
                 parse_mode=ParseMode.MARKDOWN,

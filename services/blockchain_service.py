@@ -3,8 +3,8 @@ import json
 import logging
 from typing import List, Dict, Optional, Tuple
 from web3 import Web3
-from web3.contract import Contract
-from web3.types import TxReceipt
+from web3.contract.contract import Contract
+from web3.types import TxReceipt, TxParams
 from eth_typing import Address
 from models.morpho_data import Market, MarketPosition
 from models.user_data import MarketCap
@@ -22,18 +22,17 @@ class BlockchainService:
         self.blockchain_client = blockchain_client
     
     def _build_market_params(self, market: Market) -> tuple:
-        """Build market params struct for contract call"""
-
-        logger.debug(f"Building market params for market: {market.loan_asset['address']}")
-        logger.debug(f"Collateral asset: {market.collateral_asset['address']}")
+        """Build market params struct for contract call"""        
+        logger.debug(f"Building market params for market: {market.loan_asset.address}")
+        logger.debug(f"Collateral asset: {market.collateral_asset.address}")
         logger.debug(f"Oracle address: {market.oracle_address}")
         logger.debug(f"IRM address: {market.irm_address}")
         logger.debug(f"LLTV: {market.lltv}")
 
         try:
             params = (
-                Web3.to_checksum_address(market.loan_asset['address']),
-                Web3.to_checksum_address(market.collateral_asset['address']),
+                Web3.to_checksum_address(market.loan_asset.address),
+                Web3.to_checksum_address(market.collateral_asset.address),
                 Web3.to_checksum_address(market.oracle_address),
                 Web3.to_checksum_address(market.irm_address),
                 int(market.lltv)
@@ -120,7 +119,7 @@ class BlockchainService:
             
             # Get token address from first market (all markets should have same token)
             token_address = Web3.to_checksum_address(
-                markets[actions[0].market_id].loan_asset['address']
+                markets[actions[0].market_id].loan_asset.address
             )
             
             logger.debug(f"Using token address: {token_address}")

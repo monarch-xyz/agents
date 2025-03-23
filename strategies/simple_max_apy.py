@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TypedDict
 from collections import defaultdict
 from models.morpho_data import MarketPosition, Market
 from models.user_data import MarketCap
@@ -62,26 +62,30 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         caps_by_market = {cap.market_id: cap for cap in fixed_caps}
         
         # Track actions by market to combine them
-        withdrawals_by_market = defaultdict(lambda: {
-            'amount': None,
-            'shares': None,
-            'position': None,
-            'target_cap': None
-        })
+        # Define proper types for our dictionaries
+        class WithdrawalInfo(TypedDict):
+            amount: Optional[TokenAmount]
+            shares: Optional[TokenAmount]
+            position: Optional[MarketPosition]
+            target_cap: Optional[MarketCap]
+            
+        class SupplyInfo(TypedDict):
+            amount: Optional[TokenAmount]
+            position: Optional[MarketPosition]
+            target_cap: Optional[MarketCap]
+            decimals: Optional[int]
         
-        supplies_by_market = defaultdict(lambda: {
-            'amount': None,
-            'position': None,
-            'target_cap': None,
-            'decimals': None
-        })
+        # Create dictionaries with proper initial values
+        withdrawals_by_market: Dict[str, WithdrawalInfo] = {}
+        supplies_by_market: Dict[str, SupplyInfo] = {}
         
         # Process each grouped position
         for group in grouped_positions:
+            # Get properly typed access to the group data
             token = group['loan_token']
-            token_addr = token['address']
-            symbol = token['symbol']
-            decimals = int(token.get('decimals', 18))
+            token_addr = token.address
+            symbol = token.symbol
+            decimals = token.decimals
             
             logger.info(f"\nProcessing {symbol} positions:")
             
@@ -95,7 +99,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             capped_markets = []
             for market in available_markets:
                 if market.unique_key in caps_by_market:
-                    market_apy = float(market.state['supplyApy'])
+                    market_apy = float(market.state.supply_apy)
                     capped_markets.append((market, market_apy))
             
             # Sort by APY descending
@@ -111,7 +115,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                 if not market:
                     continue
                     
-                current_apy = float(market.state['supplyApy'])
+                current_apy = float(market.state.supply_apy)
                 
                 position_amount_wei = int(pos.supply_assets)
                 
@@ -135,7 +139,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                         continue  # Skip same market
                     
                     # Calculate maximum amount that can be moved to this market (in wei)
-                    target_market_supply_wei = int(target_market.state.get('supplyAssets', 0))
+                    target_market_supply_wei = int(target_market.state.supply_assets)
                     max_allocation_wei = int(target_market_supply_wei * self.max_market_impact_ratio)
                     current_allocation_wei = self.market_allocations[target_market.unique_key]
                     remaining_allocation_wei = max_allocation_wei - current_allocation_wei
@@ -151,8 +155,8 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     # Calculate amount to move (limited by market impact)
                     move_amount_wei = min(position_amount_wei, remaining_allocation_wei)
                     
-                    decimals = int(market.loan_asset.get('decimals', 18))
-                    symbol = market.loan_asset.get('symbol', 'Unknown')
+                    decimals = target_market.loan_asset.decimals
+                    symbol = target_market.loan_asset.symbol
 
                     # check if liquidity is available from contract
                     liquidity = self.get_market_liquidity(market.unique_key)
@@ -180,39 +184,44 @@ class SimpleMaxAPYStrategy(BaseStrategy):
                     # Create withdrawal action - use shares if moving entire position
                     use_max_shares = move_amount_wei >= position_amount_wei
 
+                    # We need to convert TokenAmount to int for create_withdrawal
+                    move_amount_int = move_amount_wei
+                    
                     withdrawal = MarketAction.create_withdrawal(
                         market_id=pos.unique_key,
                         position=pos,
                         market=market,
-                        move_amount=move_amount,
+                        move_amount=move_amount_int,
                         use_max_shares=use_max_shares,
                         target_cap=target_cap
                     )
                     
                     # Combine with existing withdrawal if any
-                    market_withdrawals = withdrawals_by_market[pos.unique_key]
-                    if market_withdrawals['shares'] is None:
-                        market_withdrawals.update({
+                    if pos.unique_key not in withdrawals_by_market:
+                        withdrawals_by_market[pos.unique_key] = {
                             'shares': withdrawal.shares,
                             'amount': withdrawal.amount,
                             'position': pos,
                             'target_cap': target_cap
-                        })
+                        }
                     else:
-                        market_withdrawals['shares'] += withdrawal.shares
-                        market_withdrawals['amount'] += withdrawal.amount
+                        market_withdrawals = withdrawals_by_market[pos.unique_key]
+                        if market_withdrawals['shares'] is not None and market_withdrawals['amount'] is not None:
+                            market_withdrawals['shares'] += withdrawal.shares
+                            market_withdrawals['amount'] += withdrawal.amount
                     
                     # Track supply action
-                    market_supplies = supplies_by_market[target_market.unique_key]
-                    if market_supplies['amount'] is None:
-                        market_supplies.update({
+                    if target_market.unique_key not in supplies_by_market:
+                        supplies_by_market[target_market.unique_key] = {
                             'amount': move_amount,
                             'position': pos,
                             'target_cap': target_cap,
                             'decimals': decimals
-                        })
+                        }
                     else:
-                        market_supplies['amount'] += move_amount
+                        market_supplies = supplies_by_market[target_market.unique_key]
+                        if market_supplies['amount'] is not None:
+                            market_supplies['amount'] += move_amount
                     
                     # Update market allocation tracking (in wei)
                     self.market_allocations[target_market.unique_key] += move_amount_wei
@@ -231,7 +240,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         
         # Add combined withdrawals
         for market_id, withdrawal in withdrawals_by_market.items():
-            if withdrawal['shares'] is not None:
+            if withdrawal['shares'] is not None and withdrawal['amount'] is not None and withdrawal['position'] is not None:
                 actions.append(MarketAction(
                     market_id=market_id,
                     action_type='withdraw',
@@ -243,12 +252,12 @@ class SimpleMaxAPYStrategy(BaseStrategy):
         
         # Add combined supplies
         for market_id, supply in supplies_by_market.items():
-            if supply['amount'] is not None:
+            if supply['amount'] is not None and supply['position'] is not None:
                 actions.append(MarketAction(
                     market_id=market_id,
                     action_type='supply',
                     amount=supply['amount'],
-                    shares=TokenAmount.from_wei(0, 0),
+                    shares=TokenAmount.from_wei(0, supply['decimals'] or 0),
                     current_position=supply['position'],
                     target_cap=supply['target_cap']
                 ))

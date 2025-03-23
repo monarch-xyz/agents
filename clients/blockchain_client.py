@@ -2,11 +2,11 @@ import os
 import json
 import logging
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+
 from web3.gas_strategies.rpc import rpc_gas_price_strategy
 from eth_account import Account
-from typing import Dict, Optional, Tuple
-from web3.types import TxReceipt
+from typing import Dict, Optional, Tuple, Any, cast
+from web3.types import TxReceipt, TxParams, Wei
 from config.contracts import AGENT_CONTRACT_ADDRESS, AGENT_ABI_PATH
 
 logger = logging.getLogger(__name__)
@@ -18,9 +18,6 @@ class BlockchainClient:
             raise ValueError("WEB3_PROVIDER_URL environment variable not set")
             
         self.w3 = Web3(Web3.HTTPProvider(provider_url))
-        
-        # Add PoA middleware for Base chain
-        self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         
         # Set gas price strategy to use RPC
         self.w3.eth.set_gas_price_strategy(rpc_gas_price_strategy)
@@ -64,12 +61,12 @@ class BlockchainClient:
                 'from': self.account.address,
                 'to': tx_data.get('to'),
                 'data': tx_data.get('data'),
-                'value': value or 0
+                'value': Wei(value or 0)
             }
             
             # Simulate transaction
             logger.info("Simulating transaction...")
-            self.w3.eth.call(call_data)
+            self.w3.eth.call(cast(TxParams, call_data))
             logger.info("Transaction simulation successful")
             return True
             
@@ -77,81 +74,7 @@ class BlockchainClient:
             logger.error(f"Transaction simulation failed: {str(e)}")
             return False
 
-    async def send_transaction(
-        self,
-        tx_data: Dict,
-        value: Optional[int] = None
-    ) -> Tuple[str, TxReceipt]:
-        """
-        Send a transaction to the blockchain
-        
-        Args:
-            tx_data: Transaction data dictionary
-            value: Optional value in wei to send with transaction
-            
-        Returns:
-            Tuple of (transaction hash, transaction receipt)
-        """
-        try:
-            # Simulate transaction first
-            if not await self.simulate_transaction(tx_data, value):
-                raise ValueError("Transaction simulation failed")
-            
-            # Get the latest nonce
-            nonce = self.w3.eth.get_transaction_count(self.account.address)
-            logger.info(f"Using nonce: {nonce}")
-            
-            # Update transaction data
-            tx_data.update({
-                'nonce': nonce,
-                'from': self.account.address,
-            })
-            
-            if value:
-                tx_data['value'] = value
-                
-            # Let Base handle gas estimation
-            if 'gas' in tx_data:
-                del tx_data['gas']
-            if 'maxFeePerGas' in tx_data:
-                del tx_data['maxFeePerGas']
-            if 'maxPriorityFeePerGas' in tx_data:
-                del tx_data['maxPriorityFeePerGas']
-            
-            # Estimate gas with buffer
-            estimated_gas = self.w3.eth.estimate_gas(tx_data)
-            gas_buffer = 1.2  # 20% buffer
-            tx_data['gas'] = int(estimated_gas * gas_buffer)
-            logger.info(f"Estimated gas (with {gas_buffer}x buffer): {tx_data['gas']}")
-            
-            # Sign transaction
-            signed_tx = self.account.sign_transaction(tx_data)
-            
-            # Send transaction
-            tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-            tx_hash_hex = tx_hash.hex()
-            logger.info(f"Transaction sent: {tx_hash_hex}")
-            
-            # Wait for receipt
-            logger.info("Waiting for transaction receipt...")
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
-            
-            # Log receipt details
-            status = 'successful' if receipt['status'] == 1 else 'failed'
-            gas_used = receipt['gasUsed']
-            block_number = receipt['blockNumber']
-            logger.info(
-                f"Transaction {status} in block {block_number}. "
-                f"Gas used: {gas_used} ({(gas_used/tx_data['gas'])*100:.1f}% of estimate)"
-            )
-            
-            return tx_hash_hex, receipt
-            
-        except Exception as e:
-            logger.error(f"Transaction failed: {str(e)}")
-            raise
-
-    async def send_rebalance_transaction(self, tx_data: Dict) -> Tuple[str, TxReceipt]:
+    async def send_rebalance_transaction(self, tx_data: TxParams) -> Tuple[str, TxReceipt]:
         """Send a rebalance transaction"""
         try:
             # Let Base handle gas estimation
@@ -171,7 +94,7 @@ class BlockchainClient:
             gas_price = int(gas_price * 1.1)
             
             logger.debug(f"Using gas price: {gas_price} wei")
-            tx_data['gasPrice'] = gas_price
+            tx_data['gasPrice'] = Wei(gas_price)
             
             # Estimate gas with a 20% buffer
             estimated_gas = self.w3.eth.estimate_gas(tx_data)

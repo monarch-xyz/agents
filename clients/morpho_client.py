@@ -5,7 +5,7 @@ from typing import List, Optional, Dict
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 from aiohttp import ClientTimeout, TCPConnector, ClientSession
-from models.morpho_data import UserMarketData, Market, MarketPosition, PositionState, Asset, Chain, MorphoBlue, DailyApys, BadDebt, Warning, MarketState
+from models.morpho_data import UserMarketData, Market, MarketPosition, PositionState, Asset, Chain, MorphoBlue, DailyApys, BadDebt, Warning, MarketState, safe_decimal
 from models.morpho_subgraph import UserPositionsSubgraph
 from queries.morpho_queries import GET_USER_MARKET_POSITIONS, GET_MARKETS
 from clients.morpho_subgraph_client import MorphoSubgraphClient
@@ -83,8 +83,11 @@ class MorphoClient:
                 # Supply assets and shares for this position
                 supply_assets = Decimal(amount) if position.side == "SUPPLIER" else Decimal(0)
                 borrow_assets = Decimal(amount) if position.side == "BORROWER" else Decimal(0)
-                supply_shares = Decimal(position.shares) if position.side == "SUPPLIER" else Decimal(0)
-                borrow_shares = Decimal(position.shares) if position.side == "BORROWER" else Decimal(0)
+                
+                # Handle None values in shares
+                shares = position.shares or "0"
+                supply_shares = Decimal(shares) if position.side == "SUPPLIER" else Decimal(0)
+                borrow_shares = Decimal(shares) if position.side == "BORROWER" else Decimal(0)
                 
                 # Create PositionState object - the correct way to pass state to MarketPosition
                 position_state = PositionState(
@@ -149,8 +152,8 @@ class MorphoClient:
                         'weeklyBorrowApy': "0"
                     }),
                     daily_apys=DailyApys(
-                        net_supply_apy=Decimal(position.market.get_supply_rate()),
-                        net_borrow_apy=Decimal(position.market.get_borrow_rate())
+                        net_supply_apy=safe_decimal(position.market.get_supply_rate()),
+                        net_borrow_apy=safe_decimal(position.market.get_borrow_rate())
                     ),
                     warnings=[],
                     bad_debt=BadDebt(underlying=0, usd=0),
@@ -242,6 +245,10 @@ class MorphoClient:
                 if attempt == self.MAX_RETRIES - 1:
                     raise
                 await asyncio.sleep(1 * (attempt + 1))
+        
+        # Default return with empty data if we exit the loop without returning or raising
+        logger.warning(f"Returning empty UserMarketData after all attempts for {address}")
+        return UserMarketData(market_positions=[], transactions=[])
 
     async def get_markets(self, first: int = 100) -> List[Market]:
         """Fetch all markets from Morpho API
@@ -255,6 +262,7 @@ class MorphoClient:
         """
         for attempt in range(self.MAX_RETRIES):
             try:
+                logger.debug(f"Fetching markets (attempt {attempt + 1})")
                 query = gql(GET_MARKETS)
                 
                 result = await self._execute_query(
@@ -265,34 +273,97 @@ class MorphoClient:
                     }
                 )
                 
+                logger.debug(f"Markets API response received, checking structure")
+                if not result:
+                    logger.error("API returned None result")
+                    raise ValueError("API returned None result")
+                
+                if 'markets' not in result:
+                    logger.error(f"Missing 'markets' key in API result. Got keys: {result.keys()}")
+                    raise ValueError(f"Missing 'markets' key in API result")
+                
+                if 'items' not in result['markets']:
+                    logger.error(f"Missing 'items' key in markets result. Got keys: {result['markets'].keys()}")
+                    raise ValueError(f"Missing 'items' key in markets result")
+                    
                 markets_data = result['markets']['items']
+                logger.debug(f"Found {len(markets_data)} markets in API response")
                 markets = []
                 
-                for market_data in markets_data:
-                    # Skip markets with no collateral asset (not yet initialized)
-                    if not market_data.get('collateralAsset'):
-                        continue
+                for i, market_data in enumerate(markets_data):
+                    try:
+                        # Skip markets with no collateral asset (not yet initialized)
+                        if not market_data.get('collateralAsset'):
+                            logger.debug(f"Skipping market {i} - missing collateralAsset")
+                            continue
+                            
+                        # Flag to track if we should skip this market
+                        skip_market = False
                         
-                    market = Market(
-                        id=market_data['id'],
-                        lltv=market_data['lltv'],
-                        unique_key=market_data['uniqueKey'],
-                        irm_address=market_data['irmAddress'],
-                        oracle_address=market_data['oracleAddress'],
-                        collateral_price=market_data['collateralPrice'],
-                        morpho_blue=market_data['morphoBlue'],
-                        oracle_info=market_data['oracleInfo'],
-                        loan_asset=market_data['loanAsset'],
-                        collateral_asset=market_data['collateralAsset'],
-                        state=market_data['state'],
-                        daily_apys=market_data['dailyApys'],
-                        warnings=market_data['warnings'],
-                        bad_debt=market_data['badDebt'],
-                        realized_bad_debt=market_data['realizedBadDebt'],
-                        oracle=market_data['oracle']
-                    )
-                    markets.append(market)
+                        # Check for any None values in critical fields
+                        for field in ['loanAsset', 'state', 'dailyApys']:
+                            if market_data.get(field) is None:
+                                logger.warning(f"Market {i} has None {field}, skipping")
+                                skip_market = True
+                                break
+                                
+                        # Special handling for badDebt and realizedBadDebt - allow them to be None
+                        # but replace with default values
+                        if market_data.get('badDebt') is None:
+                            logger.warning(f"Market {i} has None badDebt, using default")
+                            market_data['badDebt'] = {'underlying': 0, 'usd': 0}
+                            
+                        if market_data.get('realizedBadDebt') is None:
+                            logger.warning(f"Market {i} has None realizedBadDebt, using default")
+                            market_data['realizedBadDebt'] = {'underlying': 0, 'usd': 0}
+                        
+                        # Check nested fields to prevent None subscript errors
+                        if not skip_market:
+                            for field, nested_fields in {
+                                'morphoBlue': ['id', 'address', 'chain'],
+                                'loanAsset': ['id', 'address', 'symbol', 'name', 'decimals'],
+                                'collateralAsset': ['id', 'address', 'symbol', 'name', 'decimals'],
+                                'dailyApys': ['netSupplyApy', 'netBorrowApy']
+                            }.items():
+                                if field not in market_data or market_data[field] is None:
+                                    logger.warning(f"Market {i} has None {field}, skipping")
+                                    skip_market = True
+                                    break
+                                    
+                                for nested_field in nested_fields:
+                                    if nested_field not in market_data[field] or market_data[field][nested_field] is None:
+                                        logger.warning(f"Market {i} has None {field}.{nested_field}, skipping")
+                                        skip_market = True
+                                        break
+                                        
+                                if skip_market:
+                                    break
+                                    
+                        # Check for morphoBlue.chain.id specially since it's deeply nested
+                        if not skip_market and (
+                            not market_data.get('morphoBlue') or 
+                            not market_data['morphoBlue'].get('chain') or
+                            not market_data['morphoBlue']['chain'].get('id')):
+                            logger.warning(f"Market {i} has missing morphoBlue.chain.id, skipping")
+                            skip_market = True
+                            
+                        # If any validation failed, skip this market
+                        if skip_market:
+                            logger.debug(f"Skipping market {i} due to validation failures")
+                            continue
+                        
+                        logger.debug(f"Processing market {i}: {market_data.get('uniqueKey', 'unknown key')}")
+                        
+                        # Create Market object using the factory method
+                        market = Market.from_api(market_data)
+                        markets.append(market)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing market {i}: {str(e)}")
+                        logger.debug(f"Market data that caused error: {market_data}")
+                        # Continue processing other markets
                 
+                logger.info(f"Successfully processed {len(markets)} markets")
                 return markets
                 
             except asyncio.TimeoutError:
@@ -306,9 +377,14 @@ class MorphoClient:
                 
             except Exception as e:
                 logger.error(f"Error fetching markets from Morpho: {str(e)}")
+                logger.exception("Stack trace:")
                 if attempt == self.MAX_RETRIES - 1:
                     raise
                 await asyncio.sleep(1 * (attempt + 1))
+        
+        # Default return with empty list if we exit the loop without returning or raising
+        logger.warning("Returning empty markets list after all attempts")
+        return []
 
     async def __aenter__(self):
         return self
