@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 from aiohttp import ClientTimeout, TCPConnector, ClientSession

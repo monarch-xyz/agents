@@ -1,12 +1,11 @@
 # config/networks.py
 import os
 
-# Define Chain IDs
+# --- Chain IDs ---
 BASE_CHAIN_ID = 8453
 POLYGON_CHAIN_ID = 137
 
 # --- Network Configuration Mapping ---
-
 NETWORKS = {
     BASE_CHAIN_ID: {
         "name": "Base",
@@ -38,7 +37,7 @@ def get_network_config(chain_id: int) -> dict:
     """Retrieve the configuration for a given chain ID."""
     config = NETWORKS.get(chain_id)
     if not config:
-        raise ValueError(f"Unsupported chain ID: {chain_id}. No configuration found in config/networks.py")
+        raise ValueError(f"Unsupported chain ID: {chain_id}. No configuration found.")
     return config
 
 def get_morpho_subgraph_url(chain_id: int) -> str:
@@ -48,13 +47,9 @@ def get_morpho_subgraph_url(chain_id: int) -> str:
     if not subgraph_id:
         raise ValueError(f"morpho_subgraph_gateway_id not configured for chain ID {chain_id}")
 
-    # Use GRAPH_API_KEY environment variable
     api_key = os.getenv("GRAPH_API_KEY")
     if not api_key:
-        # Decide if this is an error or if public access is okay (though likely rate-limited)
         raise ValueError("GRAPH_API_KEY environment variable not set. Required for Morpho subgraph gateway access.")
-        # Alternatively, construct a public URL if one exists, but gateway is preferred
-        # return f"https://api.thegraph.com/subgraphs/id/{subgraph_id}" 
 
     return f"https://gateway.thegraph.com/api/{api_key}/subgraphs/id/{subgraph_id}"
 
@@ -85,8 +80,7 @@ def get_agent_contract_address(chain_id: int) -> str:
     address = config.get("agent_contract_address")
     if not address:
         raise ValueError(f"agent_contract_address not configured for chain ID {chain_id}")
-    # TODO: Validate address format if necessary
-    if not address.startswith("0x"): # Basic check
+    if not address.startswith("0x"): # Basic format check
          raise ValueError(f"Invalid agent_contract_address format for chain ID {chain_id}: {address}")
     return address
 

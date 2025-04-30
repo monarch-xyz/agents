@@ -39,7 +39,7 @@ def main():
         logger.error("Invalid format for SUPPORTED_CHAIN_IDS. Should be comma-separated integers.")
         return
 
-    # Validate supported chains (optional but good practice)
+    # Define allowed chains here or import from config if preferred
     allowed_chains = {8453, 137}
     valid_chain_ids = [cid for cid in supported_chain_ids if cid in allowed_chains]
     invalid_chain_ids = [cid for cid in supported_chain_ids if cid not in allowed_chains]

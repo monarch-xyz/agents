@@ -2,9 +2,7 @@ import os
 import logging
 import asyncio
 from typing import List, Optional, Dict, Any
-from gql import gql, Client
-from gql.transport.aiohttp import AIOHTTPTransport
-from aiohttp import ClientTimeout, TCPConnector, ClientSession
+from aiohttp import TCPConnector
 from models.morpho_data import UserMarketData, Market, MarketPosition, PositionState, Asset, Chain, MorphoBlue, DailyApys, BadDebt, Warning, MarketState, safe_decimal
 from models.morpho_subgraph import UserPositionsSubgraph
 from clients.morpho_subgraph_client import MorphoSubgraphClient
@@ -12,13 +10,9 @@ from config.networks import get_network_config, get_morpho_subgraph_url
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 
-from queries.morpho_subgraph import GET_USER_POSITIONS_SUBGRAPH
-
 logger = logging.getLogger(__name__)
 
 logger.setLevel(logging.DEBUG)
-
-# Removed hardcoded subgraph URLs definition
 
 class MorphoClient:
     # Removed commented out legacy endpoint definition
@@ -35,7 +29,6 @@ class MorphoClient:
         subgraph_url = get_morpho_subgraph_url(self.chain_id)
         logger.info(f"[{self.chain_id}] Using Morpho Subgraph URL: {subgraph_url[:40]}...") # Log prefix
 
-        self.connector = TCPConnector(limit=10)
         self.subgraph_client = MorphoSubgraphClient(subgraph_url=subgraph_url)
 
     async def get_user_positions(self, address: str, chain_id: Optional[int] = None) -> UserMarketData:
@@ -374,7 +367,7 @@ class MorphoClient:
                 logger.warning(f"[{self.chain_id}] Subgraph returned data for chain {current_chain_id}, but conversion resulted in zero valid markets.")
                 return []
             else:
-                 logger.info(f"[{self.chain_id}] Successfully fetched and converted {len(markets)} markets from subgraph for chain {current_chain_id}.")
+                 logger.info(f"[{self.chain_id}] Successfully fetched and converted {len(markets)} markets from subgraph for chain {current_chain_id}.")                 
                  return markets
 
         except Exception as e:
@@ -390,6 +383,3 @@ class MorphoClient:
         # Close subgraph client connector if it's managed via async context
         if hasattr(self.subgraph_client, '__aexit__'):
              await self.subgraph_client.__aexit__(exc_type, exc_val, exc_tb)
-        # Optional: If SubgraphClient has a simple close method
-        # elif hasattr(self.subgraph_client, 'close'): 
-        #     await self.subgraph_client.close()
