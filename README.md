@@ -52,7 +52,6 @@ pip install -r requirements.txt
 3. Create a `.env` file in the root directory:
 ```env
 # API endpoints
-MORPHO_API_ENDPOINT=your_endpoint
 MONARCH_SUBQUERY_ENDPOINT=your_endpoint
 
 # Blockchain configuration

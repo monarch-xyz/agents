@@ -30,7 +30,7 @@ class AutomationService:
         # MonarchClient might still need an API URL from env or config
         monarch_api_url = os.getenv("MONARCH_API_URL") # Example: Get a global Monarch URL
         # self.monarch_client = MonarchClient(api_url=monarch_api_url)
-        self.monarch_client = MonarchClient() # Instantiate without api_url
+        self.monarch_client = MonarchClient(chain_id=self.chain_id) # Pass chain_id
         self.morpho_client = MorphoClient(chain_id=self.chain_id)
         self.blockchain_client = BlockchainClient(chain_id=self.chain_id)
 

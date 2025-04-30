@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 class MorphoSubgraphClient:
-    # Remove hardcoded URL
-    # MORPHO_SUBGRAPH_URL = "https://gateway.thegraph.com/api/subgraphs/id/71ZTy1veF9twER9CLMnPWeLQ7GZcwKsjmygejrgKirqs"
     MAX_RETRIES = 3
     TIMEOUT_SECONDS = 60
 
@@ -124,9 +122,7 @@ class MorphoSubgraphClient:
         # Currently, the WHERE clause in GET_MARKETS_SUBGRAPH is basic.
         variables = {
             "first": first,
-            "where": { # Add filters here if needed (e.g., based on chain_id, specific tokens)
-                 # "chainId_in": [chain_id] # Example if subgraph schema supports it
-            }
+            "where": {}
         }
 
         for attempt in range(self.MAX_RETRIES):

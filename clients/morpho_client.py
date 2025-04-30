@@ -7,23 +7,21 @@ from gql.transport.aiohttp import AIOHTTPTransport
 from aiohttp import ClientTimeout, TCPConnector, ClientSession
 from models.morpho_data import UserMarketData, Market, MarketPosition, PositionState, Asset, Chain, MorphoBlue, DailyApys, BadDebt, Warning, MarketState, safe_decimal
 from models.morpho_subgraph import UserPositionsSubgraph
-from queries.morpho_queries import GET_USER_MARKET_POSITIONS, GET_MARKETS
 from clients.morpho_subgraph_client import MorphoSubgraphClient
-from queries.morpho_subgraph import GET_MARKETS_SUBGRAPH
-from config.networks import get_network_config
+from config.networks import get_network_config, get_morpho_subgraph_url
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
+
+from queries.morpho_subgraph import GET_USER_POSITIONS_SUBGRAPH
 
 logger = logging.getLogger(__name__)
 
 logger.setLevel(logging.DEBUG)
 
-# Remove hardcoded subgraph URLs
-# SUBGRAPH_URLS = { ... }
+# Removed hardcoded subgraph URLs definition
 
 class MorphoClient:
-    # Remove hardcoded API endpoint if legacy fallback is not network specific or removed
-    # MORPHO_API_ENDPOINT = "https://blue-api.morpho.org/graphql"
+    # Removed commented out legacy endpoint definition
     MAX_RETRIES = 3
     TIMEOUT_SECONDS = 60  # Increased timeout for AWS environment
 
@@ -32,87 +30,47 @@ class MorphoClient:
         self.chain_id = chain_id
         logger.info(f"Initializing MorphoClient for chain ID: {self.chain_id}")
 
-        # Get network specific config
-        network_config = get_network_config(self.chain_id) # Handles unsupported chain error
-
-        # Get subgraph URL based on chain_id
-        subgraph_url = network_config.get("subgraph_url")
-        if not subgraph_url:
-             raise ValueError(f"subgraph_url not configured for chain ID: {chain_id}")
-        logger.info(f"[{self.chain_id}] Using Subgraph URL: {subgraph_url}")
-
-        # Get legacy API endpoint from config (might be None)
-        self.morpho_api_endpoint = network_config.get("morpho_api_url")
-        if not self.morpho_api_endpoint:
-            logger.warning(f"[{self.chain_id}] morpho_api_url not configured for chain ID {self.chain_id}. Legacy fallback might fail.")
-        else:
-            logger.info(f"[{self.chain_id}] Using legacy Morpho API endpoint: {self.morpho_api_endpoint}")
+        network_config = get_network_config(self.chain_id)
+        # Use the helper function to get the Morpho subgraph URL
+        subgraph_url = get_morpho_subgraph_url(self.chain_id)
+        logger.info(f"[{self.chain_id}] Using Morpho Subgraph URL: {subgraph_url[:40]}...") # Log prefix
 
         self.connector = TCPConnector(limit=10)
-        # Initialize subgraph client with the specific URL
         self.subgraph_client = MorphoSubgraphClient(subgraph_url=subgraph_url)
 
-    async def _execute_query(self, query, variables=None, use_legacy_endpoint: bool = False):
-        """Execute a GraphQL query with proper session management.
-           Can target legacy endpoint if specified.
-        """
-        target_url = self.morpho_api_endpoint if use_legacy_endpoint else self.subgraph_client.subgraph_url
-        if not target_url:
-             error_msg = f"[{self.chain_id}] Target URL is not configured ({'legacy' if use_legacy_endpoint else 'subgraph'})."
-             logger.error(error_msg)
-             raise ValueError(error_msg)
+    async def get_user_positions(self, address: str, chain_id: Optional[int] = None) -> UserMarketData:
+        """Fetch user's positions from the Morpho subgraph.
 
-        logger.debug(f"[{self.chain_id}] Executing query against: {target_url}")
-        timeout = ClientTimeout(total=self.TIMEOUT_SECONDS)
-        async with ClientSession(connector=self.connector, timeout=timeout) as session:
-            transport = AIOHTTPTransport(url=target_url)
-            async with Client(
-                transport=transport,
-                fetch_schema_from_transport=True
-            ) as client:
-                return await client.execute(query, variable_values=variables)
-
-    async def get_user_positions(self, address: str, chain_id: int = 8453) -> UserMarketData:
-        """Fetch user's positions from Morpho API using subgraph client
-        
         Args:
-            address: User's ethereum address
-            chain_id: Chain ID (default: 8453 for Base)
-            
+            address: User's ethereum address.
+            chain_id: Chain ID to fetch for. If None, uses the client's initialized chain_id.
+                      Note: Currently, MorphoSubgraphClient doesn't use chain_id for this query.
+
         Returns:
-            UserMarketData: User's positions and transactions
+            UserMarketData: User's positions and transactions, or empty if error/not found.
         """
-        # Ensure the correct chain_id is used, overriding default if necessary
-        if chain_id != self.chain_id:
-            logger.warning(f"[{self.chain_id}] get_user_positions called with chain_id {chain_id}, but client initialized with {self.chain_id}. Using {chain_id}.")
-            # Re-initialize subgraph client or handle appropriately if necessary
-            # For now, assume subgraph client was initialized correctly for self.chain_id
-            # and legacy fallback needs the passed chain_id.
-            current_chain_id = chain_id
-        else:
-            current_chain_id = self.chain_id
+        current_chain_id = chain_id if chain_id is not None else self.chain_id
+        if chain_id is not None and chain_id != self.chain_id:
+            logger.warning(f"[{self.chain_id}] get_user_positions called with chain_id {chain_id}, mismatch with client's {self.chain_id}. Subgraph client uses its configured URL.")
 
         try:
-            # Use the subgraph client (already configured for its URL)
-            # get_user_positions in subgraph client doesn't need chain_id
+            logger.debug(f"[{self.chain_id}] Requesting user positions for {address} from subgraph client.")
+            # Use the subgraph client directly
             subgraph_positions = await self.subgraph_client.get_user_positions(address)
-            
-            # Convert subgraph positions to UserMarketData
-            if not subgraph_positions.positions:
-                logger.info(f"[{self.chain_id}] No positions found in subgraph for {address}, falling back to legacy API")
-                # Pass the potentially overridden chain_id to legacy method
-                return await self._get_user_positions_legacy(address, current_chain_id)
-                
+
+            if not subgraph_positions or not subgraph_positions.positions:
+                logger.info(f"[{self.chain_id}] No positions found in subgraph for {address}")
+                return UserMarketData(market_positions=[], transactions=[])
+
             # Convert the subgraph positions to our internal model
-            # This is a simplified conversion - you might need to adapt this
-            # to your specific UserMarketData model
             return self._convert_subgraph_to_user_market_data(subgraph_positions, address)
-            
+
         except Exception as e:
-            logger.error(f"[{self.chain_id}] Error in subgraph fetch for {address}, falling back to legacy API: {str(e)}")
-            # Pass the potentially overridden chain_id to legacy method
-            return await self._get_user_positions_legacy(address, current_chain_id)
-            
+            # Log the error and return empty data, no fallback
+            logger.error(f"[{self.chain_id}] Error fetching user positions from subgraph for {address}: {str(e)}")
+            logger.exception("Subgraph user positions fetch stack trace:")
+            return UserMarketData(market_positions=[], transactions=[])
+
     def _convert_subgraph_to_user_market_data(self, subgraph_data: UserPositionsSubgraph, address: str) -> UserMarketData:
         """Convert subgraph data to UserMarketData format"""
         market_positions = []
@@ -189,12 +147,7 @@ class MorphoClient:
                         'fee': 0,
                         'timestamp': int(datetime.now().timestamp()),
                         'rateAtUTarget': "0",
-                        'monthlySupplyApy': "0",
-                        'monthlyBorrowApy': "0",
-                        'dailySupplyApy': "0",
-                        'dailyBorrowApy': "0",
-                        'weeklySupplyApy': "0",
-                        'weeklyBorrowApy': "0"
+                        
                     }),
                     daily_apys=DailyApys(
                         net_supply_apy=safe_decimal(position.market.get_supply_rate()),
@@ -226,80 +179,6 @@ class MorphoClient:
             market_positions=market_positions,
             transactions=[]  # The subgraph doesn't provide transactions data
         )
-
-    async def _get_user_positions_legacy(self, address: str, chain_id: int) -> UserMarketData:
-        """Legacy method to fetch user's positions from Morpho API
-        
-        Args:
-            address: User's ethereum address
-            chain_id: Chain ID (default: 8453 for Base)
-            
-        Returns:
-            UserMarketData: User's positions and transactions
-        """
-        logger.info(f"[{self.chain_id}] Fetching legacy positions for {address} on chain {chain_id}")
-        if not self.morpho_api_endpoint:
-             logger.error(f"[{self.chain_id}] Cannot fetch legacy positions, MORPHO_API_URL not configured.")
-             return UserMarketData(market_positions=[], transactions=[])
-
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                query = gql(GET_USER_MARKET_POSITIONS)
-                
-                result = await self._execute_query(
-                    query,
-                    variables={"address": address, "chainId": chain_id},
-                    use_legacy_endpoint=True # Target legacy API
-                )
-                
-                # Get raw user data
-                user_data = result['userByAddress']
-                
-                # Filter out empty positions before creating UserMarketData
-                if 'marketPositions' in user_data:
-                    filtered_positions = []
-                    for pos in user_data['marketPositions']:
-                        
-                        # Safer access to state and supplyAssets
-                        state = pos.get('state')
-                        if state is None:
-                            logger.warning(f"Position has None state: {pos}")
-                            continue
-                            
-                        try:
-                            supply_assets_raw = state.get('supplyAssets', 0)
-                            
-                            # Handle the case where supplyAssets is explicitly None
-                            supply_assets = 0 if supply_assets_raw is None else int(supply_assets_raw)
-                            if supply_assets > 0:
-                                filtered_positions.append(pos)
-                        except (TypeError, ValueError) as e:
-                            logger.error(f"Error processing position supply assets: {e}, position: {pos}")
-                            continue
-
-                    user_data['marketPositions'] = filtered_positions
-                
-                return UserMarketData.from_graphql(user_data)
-                
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"Timeout fetching user positions (attempt {attempt + 1}/{self.MAX_RETRIES})"
-                )
-                if attempt == self.MAX_RETRIES - 1:
-                    logger.error("Max retries reached for fetching user positions")
-                    raise
-                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
-                
-            except Exception as e:
-                logger.error(f"Error fetching user positions from Morpho: {str(e)}")
-                logger.exception("Detailed stacktrace:")
-                if attempt == self.MAX_RETRIES - 1:
-                    raise
-                await asyncio.sleep(1 * (attempt + 1))
-        
-        # Default return with empty data if we exit the loop without returning or raising
-        logger.warning(f"Returning empty UserMarketData after all attempts for {address}")
-        return UserMarketData(market_positions=[], transactions=[])
 
     def _convert_subgraph_market_to_market(self, subgraph_market_data: Dict[str, Any]) -> Optional[Market]:
         """Convert raw subgraph market data dictionary to a Market object."""
@@ -334,8 +213,8 @@ class MorphoClient:
 
             # --- Extract Prices ---
             # Use alias if defined in query, otherwise default field name
-            loan_price_usd = safe_decimal(loan_asset_data.get('lastPriceUsd') or loan_asset_data.get('lastPriceUSD'))
-            collateral_price_usd = safe_decimal(collateral_asset_data.get('lastPriceUsd') or collateral_asset_data.get('lastPriceUSD'))
+            loan_price_usd = safe_decimal(loan_asset_data.get('lastPriceUSD'))
+            collateral_price_usd = safe_decimal(collateral_asset_data.get('lastPriceUSD'))
             collateral_price_str = str(collateral_price_usd) # For Market.collateral_price
 
             # --- Extract Raw Amounts/Shares ---
@@ -372,12 +251,22 @@ class MorphoClient:
             fee_raw = safe_decimal(subgraph_market_data.get('fee', '0'))
             # Assuming fee is in basis points (check subgraph schema)
             fee = fee_raw / Decimal(10000)
-            timestamp = int(subgraph_market_data.get('lastUpdate', 0))
-            irm_address = subgraph_market_data.get('irm', '0x')
-            oracle_address = subgraph_market_data.get('oracleAddress', '0x') # Use direct field if available
+            timestamp = int(subgraph_market_data.get('lastUpdatedTimestamp', 0))
+            irm_address = subgraph_market_data.get('irmAddress') # Use the alias from the query
+            oracle_address = None # Extract from nested oracle object below
+            oracle_data = subgraph_market_data.get('oracle')
+            if oracle_data:
+                 oracle_address = oracle_data.get('oracleAddress')
+
+            # Ensure required addresses are found
+            if not irm_address:
+                 logger.warning(f"[{self.chain_id}] Skipping market {market_id}: Missing IRM address (irmAddress)")
+                 return None
+            if not oracle_address:
+                 logger.warning(f"[{self.chain_id}] Skipping market {market_id}: Missing Oracle address (oracle.oracleAddress)")
+                 return None
 
             # --- Construct MarketState ---
-            # Note: Some fields like rateAtUTarget are not directly available from this subgraph query
             market_state_data = {
                 'borrowAssets': str(total_borrow_assets_raw),
                 'supplyAssets': str(total_supply_assets_raw),
@@ -394,14 +283,13 @@ class MorphoClient:
                 'borrowApy': str(borrow_apy),
                 'fee': str(fee),
                 'timestamp': timestamp,
-                'rateAtUTarget': "0", # Default or placeholder
-                 # Assuming APYs from subgraph are annualized; set daily/weekly/monthly to the same for now
+                'rateAtUTarget': "0", # Not directly available
                 'dailySupplyApy': str(supply_apy),
                 'dailyBorrowApy': str(borrow_apy),
-                'weeklySupplyApy': str(supply_apy), # Placeholder
-                'weeklyBorrowApy': str(borrow_apy), # Placeholder
-                'monthlySupplyApy': str(supply_apy), # Placeholder
-                'monthlyBorrowApy': str(borrow_apy), # Placeholder
+                'weeklySupplyApy': "0", # Placeholder
+                'weeklyBorrowApy': "0", # Placeholder
+                'monthlySupplyApy': "0", # Placeholder
+                'monthlyBorrowApy': "0", # Placeholder
             }
             market_state = MarketState.from_dict(market_state_data)
 
@@ -421,24 +309,23 @@ class MorphoClient:
             )
 
             # --- Construct Market ---
-            # Placeholder for warnings, bad debt, oracle info as they aren't in the base query
             market = Market(
                 id=market_id,
                 unique_key=market_id,
                 lltv=str(lltv),
-                irm_address=irm_address,
-                oracle_address=oracle_address,
+                irm_address=irm_address, # Use extracted value
+                oracle_address=oracle_address, # Use extracted value
                 collateral_price=collateral_price_str,
                 morpho_blue=morpho_blue,
-                oracle_info={}, # Placeholder
+                oracle_info=oracle_data or {}, # Pass fetched oracle data
                 loan_asset=loan_asset,
                 collateral_asset=collateral_asset,
                 state=market_state,
                 daily_apys=daily_apys,
-                warnings=[], # Placeholder
-                bad_debt=BadDebt(underlying=0, usd=0), # Placeholder - Use int 0
-                realized_bad_debt=BadDebt(underlying=0, usd=0), # Placeholder - Use int 0
-                oracle={} # Placeholder - Map from subgraph's oracle field if needed
+                warnings=[], # Placeholder for runtime warnings
+                bad_debt=BadDebt(underlying=0, usd=0), # Not directly available
+                realized_bad_debt=BadDebt(underlying=0, usd=0), # Not directly available
+                oracle=oracle_data or {} # Keep passing the raw oracle data
             )
             return market
 
@@ -452,199 +339,57 @@ class MorphoClient:
              return None
 
     async def get_markets(self, first: int = 1000, chain_id: Optional[int] = None) -> List[Market]:
-        """Fetch markets, prioritizing the subgraph and falling back to the legacy API.
+        """Fetch markets exclusively from the subgraph.
 
         Args:
             first: Number of markets to fetch (max 1000 for subgraph).
             chain_id: Chain ID to fetch for. If None, uses the client's initialized chain_id.
+                      Note: Passed to subgraph client but might not be used in query vars.
 
         Returns:
-            List[Market]: List of markets.
+            List[Market]: List of markets, or empty list if error/not found.
         """
         current_chain_id = chain_id if chain_id is not None else self.chain_id
         if chain_id is not None and chain_id != self.chain_id:
-             logger.warning(f"[{self.chain_id}] get_markets called with chain_id {chain_id}, but client initialized with {self.chain_id}. Fetching for {chain_id}.")
-             # This implies the subgraph_client might be for the wrong network if we proceed.
-             # For simplicity now, we assume the call to subgraph_client.get_markets will handle this,
-             # or we rely on the legacy fallback for the overridden chain_id.
-        else:
-             logger.info(f"[{self.chain_id}] Attempting to fetch markets (first={first}, chain_id={current_chain_id})")
+            logger.warning(f"[{self.chain_id}] get_markets called with chain_id {chain_id}, mismatch with client's {self.chain_id}. Subgraph client uses its configured URL.")
+
+        logger.info(f"[{self.chain_id}] Attempting to fetch markets from subgraph (first={first}, chain_id={current_chain_id})")
 
         try:
             # Pass chain_id to subgraph client's get_markets
+            # The subgraph client handles the actual query execution
             subgraph_markets_data = await self.subgraph_client.get_markets(first=first, chain_id=current_chain_id)
 
-            if subgraph_markets_data:
-                markets = []
-                for market_data in subgraph_markets_data:
-                    # Conversion helper now uses self.chain_id implicitly
-                    market = self._convert_subgraph_market_to_market(market_data)
-                    if market:
-                        markets.append(market)
+            if not subgraph_markets_data:
+                logger.warning(f"[{self.chain_id}] Subgraph client returned no market data for chain {current_chain_id}.")
+                return [] # Return empty list if no data
 
-                if markets:
-                     logger.info(f"[{self.chain_id}] Successfully fetched and converted {len(markets)} markets from subgraph for chain {current_chain_id}.")
-                     return markets
-                else:
-                    logger.warning(f"[{self.chain_id}] Subgraph returned data for chain {current_chain_id}, but conversion resulted in zero markets.")
+            markets = []
+            for market_data in subgraph_markets_data:
+                market = self._convert_subgraph_market_to_market(market_data)
+                if market:
+                    markets.append(market)
+
+            if not markets:
+                logger.warning(f"[{self.chain_id}] Subgraph returned data for chain {current_chain_id}, but conversion resulted in zero valid markets.")
+                return []
             else:
-                 logger.warning(f"[{self.chain_id}] Subgraph client returned no market data for chain {current_chain_id}.")
+                 logger.info(f"[{self.chain_id}] Successfully fetched and converted {len(markets)} markets from subgraph for chain {current_chain_id}.")
+                 return markets
 
         except Exception as e:
+            # Log error and return empty list, no fallback
             logger.error(f"[{self.chain_id}] Error fetching or processing markets from subgraph for chain {current_chain_id}: {str(e)}")
-            logger.exception("Subgraph fetch/processing stack trace:")
-
-        # Fallback to legacy API if subgraph fails or returns no usable data
-        logger.warning(f"[{self.chain_id}] Falling back to legacy API to fetch markets for chain {current_chain_id}.")
-        return await self._get_markets_legacy(first=first, chain_id=current_chain_id)
-
-    async def _get_markets_legacy(self, chain_id: int, first: int = 100) -> List[Market]:
-        """Fetch all markets from Morpho legacy API (used as fallback)
-
-        Args:
-            chain_id: Chain ID (required).
-            first: Number of markets to fetch (max 100 for legacy API).
-
-        Returns:
-            List[Market]: List of markets
-        """
-        logger.info(f"[{self.chain_id}] Fetching legacy markets (first={first}) for chain {chain_id}")
-        if not self.morpho_api_endpoint:
-             logger.error(f"[{self.chain_id}] Cannot fetch legacy markets, MORPHO_API_URL not configured.")
-             return []
-
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                logger.debug(f"[{self.chain_id}] Fetching legacy markets (attempt {attempt + 1}) for chain {chain_id}")
-                query = gql(GET_MARKETS)
-
-                result = await self._execute_query(
-                    query,
-                    variables={
-                        "first": first,
-                        "where": {"whitelisted": True, "chainId_in": [chain_id]} # Use provided chain_id
-                    },
-                    use_legacy_endpoint=True # Target legacy API
-                )
-
-                logger.debug(f"[{self.chain_id}] Legacy markets API response received for chain {chain_id}, checking structure")
-                if not result:
-                    logger.error("Legacy API returned None result")
-                    raise ValueError("Legacy API returned None result")
-
-                if 'markets' not in result:
-                    logger.error(f"Missing 'markets' key in legacy API result. Got keys: {result.keys()}")
-                    raise ValueError(f"Missing 'markets' key in legacy API result")
-
-                if 'items' not in result['markets']:
-                    logger.error(f"Missing 'items' key in legacy markets result. Got keys: {result['markets'].keys()}")
-                    raise ValueError(f"Missing 'items' key in legacy markets result")
-
-                markets_data = result['markets']['items']
-                logger.debug(f"[{self.chain_id}] Found {len(markets_data)} legacy markets in API response")
-                markets = []
-
-                for i, market_data in enumerate(markets_data):
-                    try:
-                        # Skip markets with no collateral asset (not yet initialized)
-                        if not market_data.get('collateralAsset'):
-                            logger.debug(f"[{self.chain_id}] Skipping legacy market {i} - missing collateralAsset")
-                            continue
-
-                        # Flag to track if we should skip this market
-                        skip_market = False
-
-                        # Check for any None values in critical fields
-                        for field in ['loanAsset', 'state', 'dailyApys']:
-                            if market_data.get(field) is None:
-                                logger.warning(f"[{self.chain_id}] Legacy market {i} has None {field}, skipping")
-                                skip_market = True
-                                break
-
-                        # Special handling for badDebt and realizedBadDebt - allow them to be None
-                        # but replace with default values
-                        if market_data.get('badDebt') is None:
-                            logger.warning(f"[{self.chain_id}] Legacy market {i} has None badDebt, using default")
-                            market_data['badDebt'] = {'underlying': 0, 'usd': 0}
-
-                        if market_data.get('realizedBadDebt') is None:
-                            logger.warning(f"[{self.chain_id}] Legacy market {i} has None realizedBadDebt, using default")
-                            market_data['realizedBadDebt'] = {'underlying': 0, 'usd': 0}
-
-                        # Check nested fields to prevent None subscript errors
-                        if not skip_market:
-                            for field, nested_fields in {
-                                'morphoBlue': ['id', 'address', 'chain'],
-                                'loanAsset': ['id', 'address', 'symbol', 'name', 'decimals'],
-                                'collateralAsset': ['id', 'address', 'symbol', 'name', 'decimals'],
-                                'dailyApys': ['netSupplyApy', 'netBorrowApy']
-                            }.items():
-                                if field not in market_data or market_data[field] is None:
-                                    logger.warning(f"[{self.chain_id}] Legacy market {i} has None {field}, skipping")
-                                    skip_market = True
-                                    break
-
-                                for nested_field in nested_fields:
-                                    if nested_field not in market_data[field] or market_data[field][nested_field] is None:
-                                        logger.warning(f"[{self.chain_id}] Legacy market {i} has None {field}.{nested_field}, skipping")
-                                        skip_market = True
-                                        break
-
-                                if skip_market:
-                                    break
-
-                        # Check for morphoBlue.chain.id specially since it's deeply nested
-                        if not skip_market and (
-                            not market_data.get('morphoBlue') or
-                            not market_data['morphoBlue'].get('chain') or
-                            not market_data['morphoBlue']['chain'].get('id')):
-                            logger.warning(f"[{self.chain_id}] Legacy market {i} has missing morphoBlue.chain.id, skipping")
-                            skip_market = True
-
-                        # If any validation failed, skip this market
-                        if skip_market:
-                            logger.debug(f"[{self.chain_id}] Skipping legacy market {i} due to validation failures")
-                            continue
-
-                        logger.debug(f"[{self.chain_id}] Processing legacy market {i}: {market_data.get('uniqueKey', 'unknown key')}")
-
-                        # Create Market object using the factory method
-                        market = Market.from_api(market_data)
-                        markets.append(market)
-
-                    except Exception as e:
-                        logger.error(f"[{self.chain_id}] Error processing legacy market {i}: {str(e)}")
-                        logger.debug(f"Legacy market data that caused error: {market_data}")
-                        # Continue processing other markets
-
-                logger.info(f"[{self.chain_id}] Successfully processed {len(markets)} legacy markets")
-                return markets # Return successfully processed markets
-
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"[{self.chain_id}] Timeout fetching legacy markets (attempt {attempt + 1}/{self.MAX_RETRIES})"
-                )
-                if attempt == self.MAX_RETRIES - 1:
-                    logger.error("Max retries reached for fetching legacy markets")
-                    # raise # Re-raise timeout after retries
-                    break # Exit loop if max retries reached
-                await asyncio.sleep(1 * (attempt + 1))
-
-            except Exception as e:
-                logger.error(f"[{self.chain_id}] Error fetching legacy markets from Morpho: {str(e)}")
-                logger.exception("Legacy stack trace:")
-                if attempt == self.MAX_RETRIES - 1:
-                    # raise # Re-raise exception after retries
-                    break # Exit loop if max retries reached
-                await asyncio.sleep(1 * (attempt + 1))
-
-        # Corrected indentation for the final return
-        # Default return with empty list if we exit the loop without returning or raising
-        logger.warning(f"[{self.chain_id}] Returning empty markets list after all attempts in legacy fallback for chain {chain_id}")
-        return [] # Ensure return [] is always reached if loop finishes without success
+            logger.exception("Subgraph markets fetch/processing stack trace:")
+            return [] # Return empty list on error
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.connector.close()
+        # Close subgraph client connector if it's managed via async context
+        if hasattr(self.subgraph_client, '__aexit__'):
+             await self.subgraph_client.__aexit__(exc_type, exc_val, exc_tb)
+        # Optional: If SubgraphClient has a simple close method
+        # elif hasattr(self.subgraph_client, 'close'): 
+        #     await self.subgraph_client.close()
