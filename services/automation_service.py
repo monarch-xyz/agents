@@ -29,7 +29,7 @@ class AutomationService:
         self.morpho_client = MorphoClient(chain_id=self.chain_id)
         self.blockchain_client = BlockchainClient(chain_id=self.chain_id)
         self.blockchain_service = BlockchainService(self.blockchain_client)
-        self.strategy = SimpleMaxAPYStrategy()
+        self.strategy = SimpleMaxAPYStrategy(chain_id=self.chain_id)
         self.notification_service = NotificationService()
 
         # Initialize GasService using chain-specific or global env vars

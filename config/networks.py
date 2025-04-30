@@ -5,6 +5,11 @@ import os
 BASE_CHAIN_ID = 8453
 POLYGON_CHAIN_ID = 137
 
+# --- Constants ---
+# Assuming the main Morpho Blue contract address is the same on supported chains
+# Adjust if chain-specific addresses are needed
+MORPHO_BLUE_ADDRESS = "0xbbbbbbbbbb9cc5e90e3b3af64bdaf62c37eeffcb"
+
 # --- Network Configuration Mapping ---
 NETWORKS = {
     BASE_CHAIN_ID: {
@@ -16,6 +21,7 @@ NETWORKS = {
         "monarch_subgraph_url": "https://api.studio.thegraph.com/query/110397/monarch-agent-base/version/latest",
         # Legacy Morpho API URL (Optional, based on previous setup)
         "agent_contract_address": "0x6a9BA5c91fDd608b3F85c3E031a4f531f331f545",
+        "morpho_blue_address": MORPHO_BLUE_ADDRESS,
         "use_poa_middleware": False,
         "explorer_base_url": "https://basescan.org"
     },
@@ -27,6 +33,7 @@ NETWORKS = {
         # Monarch Subgraph (Direct Studio URL)
         "monarch_subgraph_url": "https://api.studio.thegraph.com/query/110397/monarch-agent-polygon/version/latest",
         "agent_contract_address": "0x01c90eEb82f982301fE4bd11e36A5704673CF18C",
+        "morpho_blue_address": "0x1bf0c2541f820e775182832f06c0b7fc27a25f67",
         "use_poa_middleware": False, # Usually False for Polygon with Alchemy
         "explorer_base_url": "https://polygonscan.com"
     },
@@ -83,6 +90,17 @@ def get_agent_contract_address(chain_id: int) -> str:
     if not address.startswith("0x"): # Basic format check
          raise ValueError(f"Invalid agent_contract_address format for chain ID {chain_id}: {address}")
     return address
+
+def get_morpho_blue_address(chain_id: int) -> str:
+     """Gets the Morpho Blue contract address for the given chain ID."""
+     config = get_network_config(chain_id)
+     address = config.get("morpho_blue_address")
+     if not address:
+          raise ValueError(f"morpho_blue_address not configured for chain ID {chain_id}")
+     # Basic format check
+     if not address.startswith("0x") or len(address) != 42:
+          raise ValueError(f"Invalid morpho_blue_address format for chain ID {chain_id}: {address}")
+     return address
 
 def get_explorer_url(chain_id: int) -> str:
      """Gets the base explorer URL for the given chain ID."""

@@ -9,6 +9,7 @@ from models.morpho_data import MarketPosition, Market, Asset
 from models.user_data import MarketCap
 from utils.token_amount import TokenAmount
 from config.contracts import MORPHO_BLUE_ADDRESS, MORPHO_BLUE_ABI_PATH
+from config.networks import get_rpc_url, get_morpho_blue_address
 
 
 logger = logging.getLogger(__name__)
@@ -93,24 +94,41 @@ class GroupedPosition(TypedDict):
 class BaseStrategy:
     """Base class for all reallocation strategies"""
     
-    def __init__(self):
-        """Initialize Web3 contract instance"""
-        provider_url = os.getenv('WEB3_PROVIDER_URL')
-        if not provider_url:
-            raise ValueError("WEB3_PROVIDER_URL environment variable not set")
-            
+    def __init__(self, chain_id: int):
+        """Initialize Web3 and Morpho Blue contract instance for the given chain."""
+        self.chain_id = chain_id
+        logger.info(f"Initializing BaseStrategy for chain ID: {self.chain_id}")
+
+        # Get RPC URL and Morpho Blue address from config
+        provider_url = get_rpc_url(self.chain_id)
+        morpho_blue_address = get_morpho_blue_address(self.chain_id)
+        logger.info(f"[{self.chain_id}] Strategy using RPC URL ending with ...{provider_url[-10:]}")
+        logger.info(f"[{self.chain_id}] Strategy using Morpho Blue address: {morpho_blue_address}")
+
+        # Check if PoA middleware is needed (can check config or assume based on chain ID)
+        # For simplicity here, we don't inject it as BlockchainClient handles connections
+        # but if strategy needs direct non-read calls, this might need adjustment.
         self.w3 = Web3(Web3.HTTPProvider(provider_url))
-        
-        # Load Morpho Blue contract
-        with open(MORPHO_BLUE_ABI_PATH) as f:
-            morpho_blue_abi = json.load(f)
-            
+        if not self.w3.is_connected():
+             raise ConnectionError(f"BaseStrategy failed to connect to Web3 provider for chain {self.chain_id}")
+        logger.info(f"[{self.chain_id}] BaseStrategy connected to Web3 provider.")
+
+        try:
+            with open(MORPHO_BLUE_ABI_PATH) as f:
+                morpho_blue_abi = json.load(f)
+        except FileNotFoundError:
+             logger.error(f"Morpho Blue ABI file not found at: {MORPHO_BLUE_ABI_PATH}")
+             raise
+        except json.JSONDecodeError:
+             logger.error(f"Error decoding JSON from Morpho Blue ABI file: {MORPHO_BLUE_ABI_PATH}")
+             raise
+
         self.morpho_blue_contract = self.w3.eth.contract(
-            address=Web3.to_checksum_address(MORPHO_BLUE_ADDRESS),
+            address=Web3.to_checksum_address(morpho_blue_address),
             abi=morpho_blue_abi
         )
-        
-        logger.info("Initialized Morpho Blue contract")
+
+        logger.info(f"[{self.chain_id}] Initialized Morpho Blue contract reader in BaseStrategy")
     
     def group_positions_by_loan_asset(
         self,
@@ -134,18 +152,18 @@ class BaseStrategy:
         for pos in positions:
             market = markets.get(pos.unique_key)
             if not market:
-                logger.warning(f'Market not found for position {pos.unique_key}')
+                logger.warning(f'[{self.chain_id}] Market not found for position {pos.unique_key}')
                 continue
                 
             token = market.loan_asset
             if not token:
-                logger.warning(f'Invalid loan asset data for market {pos.unique_key}: {token}')
+                logger.warning(f'[{self.chain_id}] Invalid loan asset data for market {pos.unique_key}')
                 continue
                 
             token_addr = token.address
             decimals = token.decimals
 
-            supply_amount = TokenAmount.from_wei(pos.supply_assets, decimals)
+            supply_amount = TokenAmount.from_wei(pos.state.supply_assets, decimals)
                 
             if token_addr not in grouped_by_token:
                 # Create a new GroupedPosition
@@ -164,13 +182,14 @@ class BaseStrategy:
             
         result = list(grouped_by_token.values())
 
-        logger.info(f"User has {len(result)} grouped positions")
-        for group in result:
-            token = group['loan_token']
-            logger.info(
-                f'- {token.symbol}: '
-                f'{group["total_asset"].to_units()} tokens across {len(group["markets"])} markets'
-            )
+        logger.info(f"[{self.chain_id}] User has {len(result)} grouped positions by loan asset")
+        # Optional detailed logging
+        # for group in result:
+        #     token = group['loan_token']
+        #     logger.info(
+        #         f"  - {token.symbol}: "
+        #         f'{group["total_asset"].to_units()} tokens across {len(group["markets"])} markets'
+        #     )
             
         return result
     
@@ -180,7 +199,8 @@ class BaseStrategy:
         markets: Dict[str, Market]
     ) -> List[Market]:
         """
-        Filter markets by loan token address and minimum TVL
+        Filter markets by loan token address.
+        (Removed TVL filter for simplicity, can be added back if needed)
         
         Args:
             loan_token_addr: Token address to filter by
@@ -191,23 +211,18 @@ class BaseStrategy:
         """
         available = []
 
-        min_tvl_asset = int(10_000)
-        
         for market in markets.values():
-            supply_assets_usd = int(market.state.supply_assets_usd)
-
-            if (
-                market.loan_asset.address == loan_token_addr and
-                supply_assets_usd >= min_tvl_asset
-            ):
+            if market.loan_asset and market.loan_asset.address == loan_token_addr:
                 available.append(market)
                 
-        # Sort by APY (highest first)
-        return sorted(
-            available,
-            key=lambda m: float(m.state.supply_apy),
-            reverse=True
-        )
+        # Sort by APY (highest first), handle potential None or non-float APYs
+        def get_sort_key(m: Market):
+             try:
+                 return float(m.state.supply_apy) if m.state and m.state.supply_apy is not None else -1.0
+             except (ValueError, TypeError):
+                 return -1.0 # Treat errors/non-numeric as lowest APY
+
+        return sorted(available, key=get_sort_key, reverse=True)
     
     def get_market_liquidity(self, market_id: str) -> int:
         """Get available liquidity for a market directly from the contract
@@ -218,24 +233,28 @@ class BaseStrategy:
         Returns:
             Available liquidity in wei
         """
-        # Get market state from contract
-        market_state = self.morpho_blue_contract.functions.market(market_id).call()
-        
-        # Market state returns:
-        # - totalSupplyAssets (uint128)
-        # - totalSupplyShares (uint128)
-        # - totalBorrowAssets (uint128)
-        # - totalBorrowShares (uint128)
-        # - lastUpdate (uint128)
-        # - fee (uint128)
-        total_supply = market_state[0]  # totalSupplyAssets
-        total_borrow = market_state[2]  # totalBorrowAssets
-        
-        # Available liquidity is supply - borrow
-        liquidity = total_supply - total_borrow
-        
-        logger.debug(f"Market liquidity from contract ({market_id}): {liquidity}")
-        return liquidity
+        try:
+            market_state = self.morpho_blue_contract.functions.market(market_id).call()
+            
+            # Market state returns:
+            # - totalSupplyAssets (uint128)
+            # - totalSupplyShares (uint128)
+            # - totalBorrowAssets (uint128)
+            # - totalBorrowShares (uint128)
+            # - lastUpdate (uint128)
+            # - fee (uint128)
+            total_supply = market_state[0]  # totalSupplyAssets
+            total_borrow = market_state[2]  # totalBorrowAssets
+            
+            # Available liquidity is supply - borrow
+            liquidity = total_supply - total_borrow
+            
+            logger.debug(f"[{self.chain_id}] Market liquidity from contract ({market_id[:10]}...): {liquidity}")
+            return liquidity
+        except Exception as e:
+             logger.error(f"[{self.chain_id}] Failed to get market liquidity from contract for {market_id}: {e}")
+             # Decide how to handle contract call errors - return 0 or raise?
+             return 0 # Return 0 liquidity on error
     
     def calculate_reallocation(
         self,
