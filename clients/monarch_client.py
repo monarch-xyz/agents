@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from typing import List
+from typing import List, Optional
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 from aiohttp import ClientTimeout, TCPConnector, ClientSession
@@ -31,15 +31,17 @@ class MonarchClient:
             ) as client:
                 return await client.execute(query, variable_values=variables)
 
-    async def get_authorized_users(self, rebalancer_address: str) -> List[UserAuthorization]:
+    async def get_authorized_users(self, rebalancer_address: str, chain_id: Optional[int] = None) -> List[UserAuthorization]:
         """Fetch users who have authorized the bot from Monarch Subquery
         
         Args:
             rebalancer_address: The address of the rebalancer contract
+            chain_id: The chain ID to fetch users for (currently unused by query).
             
         Returns:
             List[UserAuthorization]: List of users and their market caps
         """
+        logger.info(f"Fetching authorized users for rebalancer {rebalancer_address} (Chain ID: {chain_id or 'any'})")
         query = gql(GET_AUTHORIZED_USERS)
         
         for attempt in range(self.MAX_RETRIES):
