@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional, TypedDict, Any
-from collections import defaultdict
+from typing import List, Dict, Optional, TypedDict
 import logging
 import os
 import json
