@@ -33,12 +33,6 @@ class MarketState:
     fee: int
     timestamp: int
     rate_at_u_target: Decimal
-    monthly_supply_apy: Decimal
-    monthly_borrow_apy: Decimal
-    daily_supply_apy: Decimal
-    daily_borrow_apy: Decimal
-    weekly_supply_apy: Decimal
-    weekly_borrow_apy: Decimal
 
     @classmethod
     def from_dict(cls, data: dict) -> 'MarketState':
@@ -60,12 +54,6 @@ class MarketState:
             fee=int(data['fee']),
             timestamp=int(data['timestamp']),
             rate_at_u_target=safe_decimal(data['rateAtUTarget']),
-            monthly_supply_apy=safe_decimal(data['monthlySupplyApy']),
-            monthly_borrow_apy=safe_decimal(data['monthlyBorrowApy']),
-            daily_supply_apy=safe_decimal(data['dailySupplyApy']),
-            daily_borrow_apy=safe_decimal(data['dailyBorrowApy']),
-            weekly_supply_apy=safe_decimal(data['weeklySupplyApy']),
-            weekly_borrow_apy=safe_decimal(data['weeklyBorrowApy'])
         )
 
 

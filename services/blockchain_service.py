@@ -1,15 +1,15 @@
 import os
 import json
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, cast
 from web3 import Web3
-from web3.contract.contract import Contract
+# from web3.contract.contract import Contract # Unused
 from web3.types import TxReceipt, TxParams
-from eth_typing import Address
-from models.morpho_data import Market, MarketPosition
-from models.user_data import MarketCap
+# from eth_typing import Address # Unused
+from models.morpho_data import Market # MarketPosition removed
+# from models.user_data import MarketCap # Unused
 from strategies.base import MarketAction
-from utils.token_amount import TokenAmount
+# from utils.token_amount import TokenAmount # Unused
 from clients.blockchain_client import BlockchainClient
 
 logger = logging.getLogger(__name__)
@@ -23,12 +23,14 @@ class BlockchainService:
     
     def _build_market_params(self, market: Market) -> tuple:
         """Build market params struct for contract call"""        
-        logger.debug(f"Building market params for market: {market.loan_asset.address}")
-        logger.debug(f"Collateral asset: {market.collateral_asset.address}")
-        logger.debug(f"Oracle address: {market.oracle_address}")
-        logger.debug(f"IRM address: {market.irm_address}")
-        logger.debug(f"LLTV: {market.lltv}")
-
+        logger.debug(
+            f"Building market params - "
+            f"loan: {market.loan_asset.address}, "
+            f"collateral: {market.collateral_asset.address}, "
+            f"oracle: {market.oracle_address}, "
+            f"irm: {market.irm_address}, "
+            f"lltv: {market.lltv}"
+        )
         try:
             params = (
                 Web3.to_checksum_address(market.loan_asset.address),
@@ -37,18 +39,9 @@ class BlockchainService:
                 Web3.to_checksum_address(market.irm_address),
                 int(market.lltv)
             )
-            logger.debug(
-                f"Built market params - "
-                f"loan: {params[0]}, "
-                f"collateral: {params[1]}, "
-                f"oracle: {params[2]}, "
-                f"irm: {params[3]}, "
-                f"lltv: {params[4]}"
-            )
             return params
         except Exception as e:
-            logger.error(f"Error building market params: {str(e)}")
-            # logger.error(f"Market data: {market.__dict__}")
+            logger.error(f"Error building market params for market {market.id}: {str(e)}")
             raise
     
     async def rebalance(
@@ -80,7 +73,7 @@ class BlockchainService:
             for action in actions:
                 market = markets.get(action.market_id)
                 if not market:
-                    logger.warning(f"Market not found for action: {action.market_id}")
+                    logger.warning(f"Market not found for action: {action.market_id}, skipping action.")
                     continue
                     
                 logger.debug(f"Processing action for market {market.unique_key}")
@@ -110,8 +103,15 @@ class BlockchainService:
                         f"assets={action.amount.to_units() if action.amount else 0}"
                     )
             
-            if not from_markets_params:
-                raise ValueError("No withdrawal actions found")
+            if not from_markets_params or not to_markets_params:
+                # Handle cases where strategy might result in only one type of action
+                # or if markets were skipped.
+                logger.warning(f"Rebalance for {user_address} resulted in no valid from/to actions. Skipping tx.")
+                # Decide what to return or if an error should be raised
+                # For now, let's assume skipping is okay, but might need adjustment.
+                # Returning dummy values or raising a specific error might be better.
+                raise ValueError("Cannot rebalance: Invalid action combination (no from or no to actions).")
+                # Or: return ("0xSKIPPED", {}) # Example placeholder
 
             # change the last "amount" of the to market to uint256(max), indicating all remaining assets
             to_markets_params[-1] = list(to_markets_params[-1])
@@ -132,26 +132,29 @@ class BlockchainService:
             # Build transaction data
             # Get current gas price from Base
             gas_price = self.blockchain_client.w3.eth.gas_price
-            logger.debug(f"Current gas price: {gas_price}")
+            logger.debug(f"Current gas price from node: {gas_price}")
 
-            tx_data = self.blockchain_client.agent_contract.functions.rebalance(
-                Web3.to_checksum_address(user_address),  # onBehalf
-                token_address,  # token
-                from_markets_params,  # fromMarkets array [(market_params, assets, shares), ...]
-                to_markets_params     # toMarkets array [(market_params, assets, shares), ...]
-            ).build_transaction({
+            tx_params = {
                 'from': self.blockchain_client.account.address,
-                'gasPrice': gas_price,  # Use current gas price from Base
-            })
+                'gasPrice': gas_price,
+            }
+
+            tx = self.blockchain_client.agent_contract.functions.rebalance(
+                Web3.to_checksum_address(user_address),
+                token_address,
+                from_markets_params,
+                to_markets_params
+            )
+
+            # Build transaction without nonce/gas initially, casting to TxParams
+            built_tx = tx.build_transaction(cast(TxParams, tx_params))
             
-            logger.info("Transaction data composed, sending to blockchain...")
-            logger.debug(f"Transaction data: {tx_data}")
+            logger.info("Transaction data composed, sending to blockchain client...")
+            logger.debug(f"Transaction data (pre-send processing): {built_tx}")
             
             # Send transaction and return results
-            return await self.blockchain_client.send_rebalance_transaction(tx_data)
+            return await self.blockchain_client.send_rebalance_transaction(built_tx)
             
         except Exception as e:
-            logger.error(f"Error in rebalance: {str(e)}")
-            logger.error(f"User address: {user_address}")
-            # logger.error(f"Actions: {[a.__dict__ for a in actions]}")
+            logger.error(f"Error composing/sending rebalance for {user_address}: {str(e)}")
             raise

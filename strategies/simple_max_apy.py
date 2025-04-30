@@ -13,7 +13,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
     
     MAX_MARKET_IMPACT_RATIO = 0.05  # 5% of total supply
     
-    def __init__(self, max_market_impact_ratio: float = 0.05):
+    def __init__(self, chain_id: int, max_market_impact_ratio: float = 0.05):
         """
         Initialize strategy with configurable parameters
         
@@ -21,7 +21,7 @@ class SimpleMaxAPYStrategy(BaseStrategy):
             max_market_impact_ratio: Maximum ratio of market's total supply that can be allocated
                                    (default: 0.05 or 5%)
         """
-        super().__init__()  # Initialize Web3 contract
+        super().__init__(chain_id)  # Initialize Web3 contract
         self.max_market_impact_ratio = max_market_impact_ratio
         # Track allocations in wei to avoid TokenAmount complexity
         self.market_allocations = defaultdict(int)

@@ -1,23 +1,27 @@
 import os
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 from aiohttp import ClientTimeout, TCPConnector, ClientSession
 from models.morpho_subgraph import UserPositionsSubgraph
-from queries.morpho_subgraph import GET_USER_POSITIONS_SUBGRAPH
+from queries.morpho_subgraph import GET_USER_POSITIONS_SUBGRAPH, GET_MARKETS_SUBGRAPH
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 class MorphoSubgraphClient:
-    # Base subgraph URL for Morpho on Base network
-    MORPHO_SUBGRAPH_URL = "https://gateway.thegraph.com/api/subgraphs/id/71ZTy1veF9twER9CLMnPWeLQ7GZcwKsjmygejrgKirqs"
     MAX_RETRIES = 3
     TIMEOUT_SECONDS = 60
-    
-    def __init__(self):
+
+    # Accept subgraph_url in constructor
+    def __init__(self, subgraph_url: str):
+        if not subgraph_url:
+             raise ValueError("Subgraph URL must be provided to MorphoSubgraphClient")
+        self.subgraph_url = subgraph_url # Store the URL
+        logger.info(f"Initialized MorphoSubgraphClient with URL: {self.subgraph_url}")
+
         self.connector = TCPConnector(limit=10)
         # Get API key from environment variable
         self.api_key = os.getenv("GRAPH_API_KEY")
@@ -35,7 +39,7 @@ class MorphoSubgraphClient:
             
         async with ClientSession(connector=self.connector, timeout=timeout) as session:
             transport = AIOHTTPTransport(
-                url=self.MORPHO_SUBGRAPH_URL,
+                url=self.subgraph_url, # Use the instance URL
                 headers=headers
             )
             async with Client(
@@ -104,6 +108,62 @@ class MorphoSubgraphClient:
         # Create an empty UserPositionsSubgraph with no positions
         return UserPositionsSubgraph(positions=[])
     
+    async def get_markets(self, first: int = 1000, chain_id: int = 8453) -> List[Dict[str, Any]]:
+        """Fetch markets from the Morpho subgraph.
+
+        Args:
+            first: Maximum number of markets to fetch.
+            chain_id: Chain ID to filter markets (currently ignored by query, but kept for consistency).
+
+        Returns:
+            List[Dict[str, Any]]: Raw list of market data dictionaries from the subgraph.
+        """
+        # Note: chain_id filtering needs to be added to the GQL query or handled post-fetch if subgraph supports it.
+        # Currently, the WHERE clause in GET_MARKETS_SUBGRAPH is basic.
+        variables = {
+            "first": first,
+            "where": {}
+        }
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                query = gql(GET_MARKETS_SUBGRAPH) # Use the new query
+                logger.debug(f"Executing subgraph markets query (attempt {attempt + 1}): variables={variables}")
+                result = await self._execute_query(query, variables=variables)
+
+                if not result or 'markets' not in result:
+                    logger.warning(f"Subgraph query attempt {attempt + 1} returned no 'markets' data.")
+                    # Don't retry immediately if the structure is wrong, might be a query/schema issue
+                    if attempt == self.MAX_RETRIES - 1:
+                         logger.error("Max retries reached, subgraph query failed to return market data.")
+                         return [] # Return empty list on failure after retries
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue # Go to next attempt
+
+                markets_data = result['markets']
+                logger.info(f"Successfully fetched {len(markets_data)} raw markets from subgraph (attempt {attempt + 1})")
+                return markets_data # Return the raw list of dicts
+
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Timeout fetching markets from subgraph (attempt {attempt + 1}/{self.MAX_RETRIES})"
+                )
+                if attempt == self.MAX_RETRIES - 1:
+                    logger.error("Max retries reached for fetching markets from subgraph")
+                    return [] # Return empty list on timeout after retries
+                await asyncio.sleep(1 * (attempt + 1))
+
+            except Exception as e:
+                logger.error(f"Error fetching markets from Morpho subgraph: {str(e)}")
+                logger.exception("Detailed stacktrace:")
+                if attempt == self.MAX_RETRIES - 1:
+                     logger.error("Max retries reached after exception fetching markets from subgraph")
+                     return [] # Return empty list on exception after retries
+                await asyncio.sleep(1 * (attempt + 1))
+
+        logger.error("Exited market fetch loop unexpectedly, returning empty list.")
+        return [] # Should not be reached if logic is correct, but acts as safety net
+
     async def __aenter__(self):
         return self
 
