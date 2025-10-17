@@ -83,39 +83,6 @@ class BlockchainClient:
         """Checks if the Web3 instance is connected."""
         return self.w3 is not None and self.w3.is_connected()
 
-    async def simulate_transaction(
-        self,
-        tx_data: Dict,
-        value: Optional[int] = None
-    ) -> bool:
-        """
-        Simulate a transaction using eth_call
-        
-        Args:
-            tx_data: Transaction data dictionary
-            value: Optional value in wei to send with transaction
-            
-        Returns:
-            True if simulation succeeds
-        """
-        try:
-            # Prepare call data
-            call_data = {
-                'from': self.account.address,
-                'to': tx_data.get('to'),
-                'data': tx_data.get('data'),
-                'value': Wei(value or 0)
-            }
-            
-            # Simulate transaction
-            logger.info("Simulating transaction...")
-            self.w3.eth.call(cast(TxParams, call_data))
-            logger.info(f"[{self.chain_id}] Transaction simulation successful")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[{self.chain_id}] Transaction simulation failed: {str(e)}")
-            return False
 
     async def send_rebalance_transaction(self, tx_data: TxParams) -> Tuple[str, TxReceipt]:
         """Send a rebalance transaction"""
